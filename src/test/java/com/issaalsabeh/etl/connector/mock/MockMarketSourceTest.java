@@ -57,4 +57,5 @@ class MockMarketSourceTest {
                 source::poll
         );
     }
+
 }

@@ -14,6 +14,10 @@ public class ValidationTransformer implements Transformer<MarketEvent, MarketEve
             throw new IllegalArgumentException("Symbol cannot be missing");
         }
 
+        if(event.price() == null){
+            throw new IllegalArgumentException("Price cannot be null");
+        }
+
         if(event.price().signum() < 0){
             throw new IllegalArgumentException("Price cannot be negative");
         }

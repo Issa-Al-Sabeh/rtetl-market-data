@@ -61,6 +61,22 @@ public class ValidationTransformerTest {
     }
 
     @Test
+    void shouldRejectEventWithNullPrice() {
+        MarketEvent event = new MarketEvent(
+                UUID.randomUUID(),
+                "AAPL",
+                null,
+                100,
+                Instant.now()
+        );
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> transformer.transform(event)
+        );
+    }
+
+    @Test
     void shouldRejectEventWithNegativePrice() {
         MarketEvent event = new MarketEvent(
                 UUID.randomUUID(),

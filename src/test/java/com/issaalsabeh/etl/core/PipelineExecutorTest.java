@@ -26,8 +26,10 @@ class PipelineExecutorTest {
         TestSource source = new TestSource("hello");
         RecordingSink sink = new RecordingSink(1);
 
-        Pipeline<String> pipeline = new Pipeline<>(source)
-                .addSink(sink);
+        Pipeline<String> pipeline = Pipeline.<String>builder()
+                .source(source)
+                .sink(sink)
+                .build();
 
         PipelineExecutor<String> executor =
                 new PipelineExecutor<>(pipeline);
@@ -55,10 +57,12 @@ class PipelineExecutorTest {
         Transformer<String, String> upperCaseTransformer =
                 String::toUpperCase;
 
-        Pipeline<String> pipeline = new Pipeline<>(source)
-                .addTransformer(trimTransformer)
-                .addTransformer(upperCaseTransformer)
-                .addSink(sink);
+        Pipeline<String> pipeline = Pipeline.<String>builder()
+                .source(source)
+                .transform(trimTransformer)
+                .transform(upperCaseTransformer)
+                .sink(sink)
+                .build();
 
         PipelineExecutor<String> executor =
                 new PipelineExecutor<>(pipeline);
@@ -86,10 +90,12 @@ class PipelineExecutorTest {
         Transformer<String, String> second =
                 input -> input + "-B";
 
-        Pipeline<String> pipeline = new Pipeline<>(source)
-                .addTransformer(first)
-                .addTransformer(second)
-                .addSink(sink);
+        Pipeline<String> pipeline = Pipeline.<String>builder()
+                .source(source)
+                .transform(first)
+                .transform(second)
+                .sink(sink)
+                .build();
 
         PipelineExecutor<String> executor =
                 new PipelineExecutor<>(pipeline);
@@ -120,9 +126,11 @@ class PipelineExecutorTest {
             return input.toUpperCase();
         };
 
-        Pipeline<String> pipeline = new Pipeline<>(source)
-                .addTransformer(transformer)
-                .addSink(sink);
+        Pipeline<String> pipeline = Pipeline.<String>builder()
+                .source(source)
+                .transform(transformer)
+                .sink(sink)
+                .build();
 
         PipelineExecutor<String> executor =
                 new PipelineExecutor<>(pipeline);
@@ -148,9 +156,11 @@ class PipelineExecutorTest {
         FailingSink failingSink = new FailingSink();
         RecordingSink workingSink = new RecordingSink(1);
 
-        Pipeline<String> pipeline = new Pipeline<>(source)
-                .addSink(failingSink)
-                .addSink(workingSink);
+        Pipeline<String> pipeline = Pipeline.<String>builder()
+                .source(source)
+                .sink(failingSink)
+                .sink(workingSink)
+                .build();
 
         PipelineExecutor<String> executor =
                 new PipelineExecutor<>(pipeline);
@@ -174,8 +184,10 @@ class PipelineExecutorTest {
         TestSource source = new TestSource("hello");
         RecordingSink sink = new RecordingSink(1);
 
-        Pipeline<String> pipeline = new Pipeline<>(source)
-                .addSink(sink);
+        Pipeline<String> pipeline = Pipeline.<String>builder()
+                .source(source)
+                .sink(sink)
+                .build();
 
         PipelineExecutor<String> executor =
                 new PipelineExecutor<>(pipeline);
@@ -199,8 +211,10 @@ class PipelineExecutorTest {
         FailingSource source = new FailingSource();
         RecordingSink sink = new RecordingSink(0);
 
-        Pipeline<String> pipeline = new Pipeline<>(source)
-                .addSink(sink);
+        Pipeline<String> pipeline = Pipeline.<String>builder()
+                .source(source)
+                .sink(sink)
+                .build();
 
         PipelineExecutor<String> executor =
                 new PipelineExecutor<>(pipeline);

@@ -1,6 +1,7 @@
 package com.issaalsabeh.etl;
 
 import com.issaalsabeh.etl.connector.console.ConsoleSink;
+import com.issaalsabeh.etl.connector.kafka.KafkaSource;
 import com.issaalsabeh.etl.connector.mock.MockMarketSource;
 import com.issaalsabeh.etl.core.Pipeline;
 import com.issaalsabeh.etl.core.PipelineExecutor;
@@ -11,7 +12,8 @@ import com.issaalsabeh.etl.transformations.ValidationTransformer;
 public class Main {
 
     public static void main(String[] args) {
-        MockMarketSource source = new MockMarketSource();
+//        MockMarketSource source = new MockMarketSource();
+        KafkaSource source = new KafkaSource();
         ValidationTransformer validationTransformer = new ValidationTransformer();
         PriceNormalizationTransformer priceNormalizationTransformer = new PriceNormalizationTransformer();
         ConsoleSink consoleSink = new ConsoleSink();

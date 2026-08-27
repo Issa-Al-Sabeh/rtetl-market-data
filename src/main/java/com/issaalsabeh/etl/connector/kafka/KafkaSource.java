@@ -2,11 +2,14 @@ package com.issaalsabeh.etl.connector.kafka;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.issaalsabeh.etl.connector.file.FileSource;
 import com.issaalsabeh.etl.core.Source;
 import com.issaalsabeh.etl.model.MarketEvent;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.Collections;
@@ -15,19 +18,33 @@ import java.util.Properties;
 import java.util.Queue;
 
 public class KafkaSource implements Source<MarketEvent> {
-    private static final String TOPIC = "market-data";
-
+    private final String topic;
     KafkaConsumer<String, String> kafkaConsumer;
     private final Queue<ConsumerRecord<String, String>> queue = new LinkedList<>();
     private final ObjectMapper objectMapper;
+    private static final Logger logger =
+            LoggerFactory.getLogger(KafkaSource.class);
 
     public KafkaSource(){
+        this(
+                "localhost:9092",
+                "market-data",
+                "market-data-etl"
+        );
+    }
+
+    public KafkaSource(
+            String bootstrapServers,
+            String topic,
+            String groupId
+    ){
+        this.topic = topic;
 
         Properties properties = new Properties();
 
         properties.put(
                 "bootstrap.servers",
-                "localhost:9092"
+                bootstrapServers
         );
 
         properties.put(
@@ -42,7 +59,7 @@ public class KafkaSource implements Source<MarketEvent> {
 
         properties.put(
                 "group.id",
-                "market-data-etl"
+                groupId
         );
 
         kafkaConsumer = new KafkaConsumer<>(properties);
@@ -52,7 +69,7 @@ public class KafkaSource implements Source<MarketEvent> {
     }
     @Override
     public void start() {
-        kafkaConsumer.subscribe(Collections.singleton(TOPIC));
+        kafkaConsumer.subscribe(Collections.singleton(topic));
     }
 
     @Override
@@ -79,8 +96,9 @@ public class KafkaSource implements Source<MarketEvent> {
                     MarketEvent.class
             );
         } catch (JsonProcessingException e) {
-            System.err.println(
-                    "Skipping malformed Kafka message: " + record.value()
+            logger.warn(
+                    "Skipping malformed Kafka message: {}",
+                    record.value()
             );
 
             return null;

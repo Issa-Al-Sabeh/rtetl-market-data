@@ -1,0 +1,83 @@
+package com.issaalsabeh.etl.core.factory;
+
+import com.issaalsabeh.etl.config.SinkConfig;
+import com.issaalsabeh.etl.connector.console.ConsoleSink;
+import com.issaalsabeh.etl.connector.kafka.KafkaSink;
+import com.issaalsabeh.etl.connector.postgres.PostgresSink;
+import com.issaalsabeh.etl.core.Sink;
+import com.issaalsabeh.etl.model.MarketEvent;
+import org.junit.jupiter.api.Test;
+
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
+public class SinkFactoryTest {
+
+    @Test
+    void shouldCreateConsoleSink() {
+
+        SinkConfig config = new SinkConfig(
+                "console",
+                Map.of()
+        );
+
+        Sink<MarketEvent> sink =
+                SinkFactory.create(config);
+
+        assertThat(sink)
+                .isInstanceOf(ConsoleSink.class);
+    }
+
+    @Test
+    void shouldRejectUnknownSinkType() {
+
+        SinkConfig config = new SinkConfig(
+                "redis",
+                Map.of()
+        );
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> SinkFactory.create(config)
+        );
+    }
+
+    @Test
+    void shouldCreatePostgresSink() {
+
+        SinkConfig config = new SinkConfig(
+                "postgres",
+                Map.of(
+                        "url", "jdbc:postgresql://localhost:5432/market_data",
+                        "username", "test",
+                        "password", "test"
+                )
+        );
+
+        Sink<MarketEvent> sink =
+                SinkFactory.create(config);
+
+        assertThat(sink)
+                .isInstanceOf(PostgresSink.class);
+    }
+
+    @Test
+    void shouldCreateKafkaSink() {
+
+        SinkConfig config = new SinkConfig(
+                "kafka",
+                Map.of(
+                        "bootstrap.servers", "localhost:9092",
+                        "topic", "processed-market-data"
+                )
+        );
+
+        Sink<MarketEvent> sink =
+                SinkFactory.create(config);
+
+        assertThat(sink)
+                .isInstanceOf(KafkaSink.class);
+    }
+}

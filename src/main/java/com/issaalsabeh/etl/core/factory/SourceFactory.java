@@ -9,8 +9,7 @@ import com.issaalsabeh.etl.model.MarketEvent;
 
 public final class SourceFactory {
 
-    private SourceFactory() {
-    }
+    private SourceFactory() {}
 
     public static Source<MarketEvent> create(SourceConfig config) {
 

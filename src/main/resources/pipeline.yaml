@@ -1,0 +1,13 @@
+pipeline:
+  source:
+    type: file
+    properties:
+      path: data/market-events.jsonl
+
+  transformations:
+    - validate
+    - normalize
+
+  sinks:
+    - type: console
+      properties: {}

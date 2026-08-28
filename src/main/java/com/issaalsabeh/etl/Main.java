@@ -1,64 +1,32 @@
 package com.issaalsabeh.etl;
 
-import com.issaalsabeh.etl.config.SinkConfig;
-import com.issaalsabeh.etl.config.SourceConfig;
+import com.issaalsabeh.etl.config.PipelineConfig;
+import com.issaalsabeh.etl.config.PipelineConfigLoader;
 import com.issaalsabeh.etl.core.Pipeline;
 import com.issaalsabeh.etl.core.PipelineExecutor;
-import com.issaalsabeh.etl.core.Sink;
-import com.issaalsabeh.etl.core.Source;
-import com.issaalsabeh.etl.core.factory.SinkFactory;
-import com.issaalsabeh.etl.core.factory.SourceFactory;
+import com.issaalsabeh.etl.core.factory.PipelineFactory;
 import com.issaalsabeh.etl.model.MarketEvent;
-import com.issaalsabeh.etl.transformations.PriceNormalizationTransformer;
-import com.issaalsabeh.etl.transformations.ValidationTransformer;
-
-import java.util.Map;
 
 public class Main {
 
     public static void main(String[] args) {
 
-        SourceConfig config = new SourceConfig(
-                "file",
-                Map.of(
-                        "path", "data/market-events.jsonl"
-                )
-        );
+        PipelineConfigLoader loader =
+                new PipelineConfigLoader();
 
-        Source<MarketEvent> source =
-                SourceFactory.create(config);
-
-        ValidationTransformer validationTransformer =
-                new ValidationTransformer();
-
-        PriceNormalizationTransformer priceNormalizationTransformer =
-                new PriceNormalizationTransformer();
-
-        SinkConfig sinkConfig = new SinkConfig(
-                "postgres",
-                Map.of(
-                "url", "jdbc:postgresql://localhost:5432/market_data",
-                "username", System.getenv("POSTGRES_USER"),
-                "password", System.getenv("POSTGRES_PASSWORD")
-                )
-        );
-        Sink<MarketEvent> sink = SinkFactory.create(sinkConfig);
+        PipelineConfig config =
+                loader.load();
 
         Pipeline<MarketEvent> pipeline =
-                Pipeline.<MarketEvent>builder()
-                        .source(source)
-                        .transform(validationTransformer)
-                        .transform(priceNormalizationTransformer)
-                        .sink(sink)
-                        .build();
+                PipelineFactory.create(config);
 
-        PipelineExecutor<MarketEvent> pipelineExecutor =
+        PipelineExecutor<MarketEvent> executor =
                 new PipelineExecutor<>(pipeline);
 
         Runtime.getRuntime().addShutdownHook(
-                new Thread(pipelineExecutor::stop)
+                new Thread(executor::stop)
         );
 
-        pipelineExecutor.start();
+        executor.start();
     }
 }

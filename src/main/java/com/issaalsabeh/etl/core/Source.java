@@ -23,4 +23,13 @@ public interface Source<T> {
      * Stops the source and releases its resources.
      */
     void stop();
+
+    /**
+     * Returns the runtime type of data produced by this source.
+     * This is used to validate type compatibility between the source
+     * and the next stage in the pipeline.
+     *
+     * @return the class representing the output data type
+     */
+    Class<?> getOutputType();
 }

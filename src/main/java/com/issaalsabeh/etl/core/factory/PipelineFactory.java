@@ -4,10 +4,7 @@ import com.issaalsabeh.etl.config.PipelineConfig;
 import com.issaalsabeh.etl.config.PipelineConfigValidator;
 import com.issaalsabeh.etl.config.SinkConfig;
 import com.issaalsabeh.etl.config.SourceConfig;
-import com.issaalsabeh.etl.core.Pipeline;
-import com.issaalsabeh.etl.core.Sink;
-import com.issaalsabeh.etl.core.Source;
-import com.issaalsabeh.etl.core.Transformer;
+import com.issaalsabeh.etl.core.*;
 import com.issaalsabeh.etl.model.MarketEvent;
 
 import java.util.ArrayList;
@@ -36,7 +33,11 @@ public final class PipelineFactory {
             builder.sink(sink);
         }
 
-        return builder.build();
+        Pipeline<MarketEvent> pipeline = builder.build();
+
+        PipelineTypeValidator.validate(pipeline);
+
+        return pipeline;
 
     }
 

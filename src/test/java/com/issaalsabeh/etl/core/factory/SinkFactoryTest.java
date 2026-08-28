@@ -2,6 +2,7 @@ package com.issaalsabeh.etl.core.factory;
 
 import com.issaalsabeh.etl.config.SinkConfig;
 import com.issaalsabeh.etl.connector.console.ConsoleSink;
+import com.issaalsabeh.etl.connector.console.EnrichedConsoleSink;
 import com.issaalsabeh.etl.connector.kafka.KafkaSink;
 import com.issaalsabeh.etl.connector.postgres.PostgresSink;
 import com.issaalsabeh.etl.core.Sink;
@@ -23,7 +24,7 @@ public class SinkFactoryTest {
                 Map.of()
         );
 
-        Sink<MarketEvent> sink =
+        Sink<?> sink =
                 SinkFactory.create(config);
 
         assertThat(sink)
@@ -56,7 +57,7 @@ public class SinkFactoryTest {
                 )
         );
 
-        Sink<MarketEvent> sink =
+        Sink<?> sink =
                 SinkFactory.create(config);
 
         assertThat(sink)
@@ -74,10 +75,26 @@ public class SinkFactoryTest {
                 )
         );
 
-        Sink<MarketEvent> sink =
+        Sink<?> sink =
                 SinkFactory.create(config);
 
         assertThat(sink)
                 .isInstanceOf(KafkaSink.class);
+    }
+
+    @Test
+    void shouldCreateEnrichedConsoleSink() {
+
+        SinkConfig config =
+                new SinkConfig(
+                        "enriched-console",
+                        null
+                );
+
+        Sink<?> sink =
+                SinkFactory.create(config);
+
+        assertThat(sink)
+                .isInstanceOf(EnrichedConsoleSink.class);
     }
 }

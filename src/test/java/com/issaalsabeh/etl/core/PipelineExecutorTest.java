@@ -259,6 +259,11 @@ class PipelineExecutorTest {
         public void stop() {
             stopped = true;
         }
+
+        @Override
+        public Class<?> getOutputType() {
+            return String.class;
+        }
     }
 
 
@@ -280,6 +285,11 @@ class PipelineExecutorTest {
         @Override
         public void stop() {
             stopped = true;
+        }
+
+        @Override
+        public Class<?> getOutputType() {
+            return String.class;
         }
     }
 
@@ -316,6 +326,11 @@ class PipelineExecutorTest {
             stopped = true;
         }
 
+        @Override
+        public Class<?> getInputType() {
+            return String.class;
+        }
+
         boolean awaitEvent() throws InterruptedException {
             return latch.await(1, TimeUnit.SECONDS);
         }
@@ -341,6 +356,11 @@ class PipelineExecutorTest {
 
         @Override
         public void stop() {
+        }
+
+        @Override
+        public Class<?> getInputType() {
+            return String.class;
         }
     }
 }

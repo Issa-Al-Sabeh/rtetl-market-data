@@ -18,4 +18,14 @@ public class EnrichmentTransformer implements Transformer<MarketEvent, EnrichedM
                 input.price().multiply(BigDecimal.valueOf(input.volume()))
         );
     }
+
+    @Override
+    public Class<?> getInputType() {
+        return MarketEvent.class;
+    }
+
+    @Override
+    public Class<?> getOutputType() {
+        return EnrichedMarketEvent.class;
+    }
 }

@@ -19,6 +19,11 @@ class PipelineBuilderTest {
         @Override
         public void stop() {
         }
+
+        @Override
+        public Class<?> getOutputType() {
+            return String.class;
+        }
     };
 
     private final Transformer<String, String> transformer1 =
@@ -39,6 +44,11 @@ class PipelineBuilderTest {
         @Override
         public void stop() {
         }
+
+        @Override
+        public Class<?> getInputType() {
+            return String.class;
+        }
     };
 
     private final Sink<String> sink2 = new Sink<>() {
@@ -52,6 +62,11 @@ class PipelineBuilderTest {
 
         @Override
         public void stop() {
+        }
+
+        @Override
+        public Class<?> getInputType() {
+            return String.class;
         }
     };
 

@@ -28,4 +28,14 @@ public class ValidationTransformer implements Transformer<MarketEvent, MarketEve
 
         return event;
     }
+
+    @Override
+    public Class<?> getInputType() {
+        return MarketEvent.class;
+    }
+
+    @Override
+    public Class<?> getOutputType() {
+        return MarketEvent.class;
+    }
 }

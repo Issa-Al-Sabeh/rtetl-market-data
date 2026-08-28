@@ -22,4 +22,9 @@ class TestSource implements Source<String> {
     public void stop() {
         data.clear();
     }
+
+    @Override
+    public Class<?> getOutputType() {
+        return String.class;
+    }
 }

@@ -102,4 +102,9 @@ public class FileSource implements Source<MarketEvent> {
             }
         }
     }
+
+    @Override
+    public Class<?> getOutputType() {
+        return MarketEvent.class;
+    }
 }

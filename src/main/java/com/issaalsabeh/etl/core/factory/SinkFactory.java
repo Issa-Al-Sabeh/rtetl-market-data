@@ -2,17 +2,17 @@ package com.issaalsabeh.etl.core.factory;
 
 import com.issaalsabeh.etl.config.SinkConfig;
 import com.issaalsabeh.etl.connector.console.ConsoleSink;
+import com.issaalsabeh.etl.connector.console.EnrichedConsoleSink;
 import com.issaalsabeh.etl.connector.kafka.KafkaSink;
 import com.issaalsabeh.etl.connector.postgres.PostgresSink;
 import com.issaalsabeh.etl.core.Sink;
-import com.issaalsabeh.etl.model.MarketEvent;
 
 public final class SinkFactory {
 
     private SinkFactory() {
     }
 
-    public static Sink<MarketEvent> create(SinkConfig config) {
+    public static Sink<?> create(SinkConfig config) {
 
         if (config == null) {
             throw new IllegalArgumentException(
@@ -24,6 +24,10 @@ public final class SinkFactory {
 
         if (type.equalsIgnoreCase("console")) {
             return new ConsoleSink();
+        }
+
+        if (type.equalsIgnoreCase("enriched-console")) {
+            return new EnrichedConsoleSink();
         }
 
         if (type.equalsIgnoreCase("kafka")) {

@@ -94,4 +94,9 @@ public class PostgresSink implements Sink<MarketEvent> {
             }
         }
     }
+
+    @Override
+    public Class<?> getInputType() {
+        return MarketEvent.class;
+    }
 }

@@ -59,4 +59,9 @@ public class MockMarketSource implements Source<MarketEvent> {
     public void stop() {
         running = false;
     }
+
+    @Override
+    public Class<?> getOutputType() {
+        return MarketEvent.class;
+    }
 }

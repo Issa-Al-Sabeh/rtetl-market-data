@@ -103,4 +103,9 @@ public class KafkaSink implements Sink<MarketEvent> {
             kafkaProducer = null;
         }
     }
+
+    @Override
+    public Class<?> getInputType() {
+        return MarketEvent.class;
+    }
 }

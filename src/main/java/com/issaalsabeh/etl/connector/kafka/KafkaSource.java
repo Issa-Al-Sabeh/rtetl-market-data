@@ -109,4 +109,9 @@ public class KafkaSource implements Source<MarketEvent> {
     public void stop() {
         kafkaConsumer.close();
     }
+
+    @Override
+    public Class<?> getOutputType() {
+        return MarketEvent.class;
+    }
 }

@@ -23,4 +23,13 @@ public interface Sink<T> {
      * Stops the sink and releases any resources used by it.
      */
     void stop();
+
+    /**
+     * Returns the runtime type expected as input by this transformer.
+     * This is used to validate type compatibility with the previous
+     * stage in the pipeline.
+     *
+     * @return the class representing the input data type
+     */
+    Class<?> getInputType();
 }

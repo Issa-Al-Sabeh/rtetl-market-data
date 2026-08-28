@@ -20,3 +20,6 @@ logs/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Local documentation
+PROJECT_OVERVIEW.md

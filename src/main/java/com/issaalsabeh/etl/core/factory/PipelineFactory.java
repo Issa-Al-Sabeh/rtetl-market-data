@@ -33,11 +33,7 @@ public final class PipelineFactory {
             builder.sink(sink);
         }
 
-        Pipeline<MarketEvent> pipeline = builder.build();
-
-        PipelineTypeValidator.validate(pipeline);
-
-        return pipeline;
+        return builder.build();
 
     }
 

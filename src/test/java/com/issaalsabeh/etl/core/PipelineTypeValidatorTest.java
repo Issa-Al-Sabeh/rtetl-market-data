@@ -50,11 +50,15 @@ class PipelineTypeValidatorTest {
     void shouldRejectIncompatibleSinkType() {
 
         Pipeline<MarketEvent> pipeline =
-                Pipeline.<MarketEvent>builder()
-                        .source(new TestMarketSource())
-                        .transform(new EnrichmentTransformer())
-                        .sink(new ConsoleSink())
-                        .build();
+                new Pipeline<>(new TestMarketSource());
+
+        pipeline.addTransformer(
+                new EnrichmentTransformer()
+        );
+
+        pipeline.addSink(
+                new ConsoleSink()
+        );
 
         assertThatThrownBy(() ->
                 PipelineTypeValidator.validate(pipeline)
@@ -67,12 +71,19 @@ class PipelineTypeValidatorTest {
     void shouldRejectIncompatibleTransformerType() {
 
         Pipeline<MarketEvent> pipeline =
-                Pipeline.<MarketEvent>builder()
-                        .source(new TestMarketSource())
-                        .transform(new EnrichmentTransformer())
-                        .transform(new ValidationTransformer())
-                        .sink(new EnrichedConsoleSink())
-                        .build();
+                new Pipeline<>(new TestMarketSource());
+
+        pipeline.addTransformer(
+                new EnrichmentTransformer()
+        );
+
+        pipeline.addTransformer(
+                new ValidationTransformer()
+        );
+
+        pipeline.addSink(
+                new EnrichedConsoleSink()
+        );
 
         assertThatThrownBy(() ->
                 PipelineTypeValidator.validate(pipeline)

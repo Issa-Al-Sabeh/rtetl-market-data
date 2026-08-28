@@ -59,6 +59,8 @@ public class Pipeline<T> {
         if (sinks.isEmpty()) {
             throw new IllegalStateException("Pipeline must have at least one sink");
         }
+
+        PipelineTypeValidator.validate(this);
     }
 
     public static class Builder<T> {

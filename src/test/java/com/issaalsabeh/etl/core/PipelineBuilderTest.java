@@ -2,239 +2,327 @@ package com.issaalsabeh.etl.core;
 
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.*;
+import java.util.ArrayList;
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class PipelineBuilderTest {
 
-    private final Source<String> source = new Source<>() {
+    @Test
+    void shouldBuildPipelineWithSourceAndSink() {
+
+        TestSource source = new TestSource();
+        TestSink sink = new TestSink();
+
+        Pipeline<String> pipeline = Pipeline.<String>builder()
+                .source(source)
+                .sink(sink)
+                .build();
+
+        assertThat(pipeline.getSource()).isSameAs(source);
+        assertThat(pipeline.getSinks()).containsExactly(sink);
+    }
+
+    @Test
+    void shouldBuildPipelineWithTransformer() {
+
+        TestSource source = new TestSource();
+
+        Transformer<String, String> transformer =
+                new UppercaseTransformer();
+
+        TestSink sink = new TestSink();
+
+        Pipeline<String> pipeline = Pipeline.<String>builder()
+                .source(source)
+                .transform(transformer)
+                .sink(sink)
+                .build();
+
+        assertThat(pipeline.getTransformers())
+                .containsExactly(transformer);
+    }
+
+    @Test
+    void shouldPreserveTransformerOrder() {
+
+        TestSource source = new TestSource();
+
+        Transformer<String, String> first =
+                new UppercaseTransformer();
+
+        Transformer<String, String> second =
+                new TrimTransformer();
+
+        TestSink sink = new TestSink();
+
+        Pipeline<String> pipeline = Pipeline.<String>builder()
+                .source(source)
+                .transform(first)
+                .transform(second)
+                .sink(sink)
+                .build();
+
+        assertThat(pipeline.getTransformers())
+                .containsExactly(first, second);
+    }
+
+    @Test
+    void shouldPreserveSinkOrder() {
+
+        TestSource source = new TestSource();
+
+        TestSink first = new TestSink();
+        TestSink second = new TestSink();
+
+        Pipeline<String> pipeline = Pipeline.<String>builder()
+                .source(source)
+                .sink(first)
+                .sink(second)
+                .build();
+
+        assertThat(pipeline.getSinks())
+                .containsExactly(first, second);
+    }
+
+    @Test
+    void shouldRejectMissingSource() {
+
+        TestSink sink = new TestSink();
+
+        assertThatThrownBy(() ->
+                Pipeline.<String>builder()
+                        .sink(sink)
+                        .build()
+        )
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void shouldRejectMissingSink() {
+
+        TestSource source = new TestSource();
+
+        assertThatThrownBy(() ->
+                Pipeline.<String>builder()
+                        .source(source)
+                        .build()
+        )
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void shouldRejectNullSource() {
+
+        assertThatThrownBy(() ->
+                Pipeline.<String>builder()
+                        .source(null)
+        )
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void shouldRejectNullTransformer() {
+
+        assertThatThrownBy(() ->
+                Pipeline.<String>builder()
+                        .transform(null)
+        )
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void shouldRejectNullSink() {
+
+        assertThatThrownBy(() ->
+                Pipeline.<String>builder()
+                        .sink(null)
+        )
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void shouldProtectPipelineCollectionsFromExternalModification() {
+
+        TestSource source = new TestSource();
+
+        Transformer<String, String> transformer =
+                new UppercaseTransformer();
+
+        TestSink sink = new TestSink();
+
+        Pipeline<String> pipeline = Pipeline.<String>builder()
+                .source(source)
+                .transform(transformer)
+                .sink(sink)
+                .build();
+
+        assertThatThrownBy(() ->
+                pipeline.getTransformers().add(new TrimTransformer())
+        )
+                .isInstanceOf(UnsupportedOperationException.class);
+
+        assertThatThrownBy(() ->
+                pipeline.getSinks().add(new TestSink())
+        )
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    void shouldCreateIndependentPipelineSnapshot() {
+
+        TestSource source = new TestSource();
+
+        Transformer<String, String> transformer =
+                new UppercaseTransformer();
+
+        TestSink sink = new TestSink();
+
+        Pipeline.Builder<String> builder =
+                Pipeline.<String>builder()
+                        .source(source)
+                        .transform(transformer)
+                        .sink(sink);
+
+        Pipeline<String> firstPipeline = builder.build();
+
+        Transformer<String, String> secondTransformer =
+                new TrimTransformer();
+
+        TestSink secondSink = new TestSink();
+
+        builder.transform(secondTransformer);
+        builder.sink(secondSink);
+
+        Pipeline<String> secondPipeline = builder.build();
+
+        assertThat(firstPipeline.getTransformers())
+                .containsExactly(transformer);
+
+        assertThat(firstPipeline.getSinks())
+                .containsExactly(sink);
+
+        assertThat(secondPipeline.getTransformers())
+                .containsExactly(
+                        transformer,
+                        secondTransformer
+                );
+
+        assertThat(secondPipeline.getSinks())
+                .containsExactly(
+                        sink,
+                        secondSink
+                );
+    }
+
+    @Test
+    void shouldRejectIncompatiblePipelineDuringBuild() {
+
+        TestSource source = new TestSource();
+
+        Transformer<Integer, Integer> transformer =
+                new IntegerTransformer();
+
+        TestSink sink = new TestSink();
+
+        assertThatThrownBy(() ->
+                Pipeline.<String>builder()
+                        .source(source)
+                        .transform(transformer)
+                        .sink(sink)
+                        .build()
+        )
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Pipeline type mismatch");
+    }
+
+
+    /*
+     * Test helpers
+     */
+
+    private static class TestSink implements Sink<String> {
+
+        private final List<String> received = new ArrayList<>();
+
         @Override
         public void start() {
         }
 
         @Override
-        public String poll() {
-            return "test";
+        public void write(String data) {
+            received.add(data);
         }
 
         @Override
         public void stop() {
+        }
+
+        @Override
+        public Class<?> getInputType() {
+            return String.class;
+        }
+    }
+
+
+    private static class UppercaseTransformer
+            implements Transformer<String, String> {
+
+        @Override
+        public String transform(String input) {
+            return input.toUpperCase();
+        }
+
+        @Override
+        public Class<?> getInputType() {
+            return String.class;
         }
 
         @Override
         public Class<?> getOutputType() {
             return String.class;
         }
-    };
+    }
 
-    private final Transformer<String, String> transformer1 =
-            String::trim;
 
-    private final Transformer<String, String> transformer2 =
-            String::toUpperCase;
-
-    private final Sink<String> sink1 = new Sink<>() {
-        @Override
-        public void start() {
-        }
+    private static class TrimTransformer
+            implements Transformer<String, String> {
 
         @Override
-        public void write(String data) {
-        }
-
-        @Override
-        public void stop() {
+        public String transform(String input) {
+            return input.trim();
         }
 
         @Override
         public Class<?> getInputType() {
             return String.class;
         }
-    };
 
-    private final Sink<String> sink2 = new Sink<>() {
         @Override
-        public void start() {
+        public Class<?> getOutputType() {
+            return String.class;
         }
+    }
+
+
+    private static class IntegerTransformer
+            implements Transformer<Integer, Integer> {
 
         @Override
-        public void write(String data) {
-        }
-
-        @Override
-        public void stop() {
+        public Integer transform(Integer input) {
+            return input;
         }
 
         @Override
         public Class<?> getInputType() {
-            return String.class;
+            return Integer.class;
         }
-    };
 
-    @Test
-    void shouldBuildPipelineWithSourceAndSink() {
-        Pipeline<String> pipeline = Pipeline.<String>builder()
-                .source(source)
-                .sink(sink1)
-                .build();
-
-        assertEquals(source, pipeline.getSource());
-        assertEquals(1, pipeline.getSinks().size());
-        assertEquals(sink1, pipeline.getSinks().get(0));
-    }
-
-    @Test
-    void shouldBuildPipelineWithTransformer() {
-        Pipeline<String> pipeline = Pipeline.<String>builder()
-                .source(source)
-                .transform(transformer1)
-                .sink(sink1)
-                .build();
-
-        assertEquals(1, pipeline.getTransformers().size());
-        assertEquals(transformer1, pipeline.getTransformers().get(0));
-    }
-
-    @Test
-    void shouldPreserveTransformerOrder() {
-        Pipeline<String> pipeline = Pipeline.<String>builder()
-                .source(source)
-                .transform(transformer1)
-                .transform(transformer2)
-                .sink(sink1)
-                .build();
-
-        assertEquals(2, pipeline.getTransformers().size());
-        assertEquals(transformer1, pipeline.getTransformers().get(0));
-        assertEquals(transformer2, pipeline.getTransformers().get(1));
-    }
-
-    @Test
-    void shouldAllowMultipleSinks() {
-        Pipeline<String> pipeline = Pipeline.<String>builder()
-                .source(source)
-                .sink(sink1)
-                .sink(sink2)
-                .build();
-
-        assertEquals(2, pipeline.getSinks().size());
-        assertEquals(sink1, pipeline.getSinks().get(0));
-        assertEquals(sink2, pipeline.getSinks().get(1));
-    }
-
-    @Test
-    void shouldRejectMissingSource() {
-        assertThrows(
-                IllegalStateException.class,
-                () -> Pipeline.<String>builder()
-                        .sink(sink1)
-                        .build()
-        );
-    }
-
-    @Test
-    void shouldRejectMissingSink() {
-        assertThrows(
-                IllegalStateException.class,
-                () -> Pipeline.<String>builder()
-                        .source(source)
-                        .build()
-        );
-    }
-
-    @Test
-    void shouldRejectNullSource() {
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> Pipeline.<String>builder()
-                        .source(null)
-        );
-    }
-
-    @Test
-    void shouldRejectNullTransformer() {
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> Pipeline.<String>builder()
-                        .source(source)
-                        .transform(null)
-        );
-    }
-
-    @Test
-    void shouldRejectNullSink() {
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> Pipeline.<String>builder()
-                        .source(source)
-                        .sink(null)
-        );
-    }
-
-    @Test
-    void shouldReturnSameBuilderWhenSettingSource() {
-        Pipeline.Builder<String> builder = Pipeline.builder();
-
-        Pipeline.Builder<String> result =
-                builder.source(source);
-
-        assertSame(builder, result);
-    }
-
-    @Test
-    void shouldReturnSameBuilderWhenAddingTransformer() {
-        Pipeline.Builder<String> builder = Pipeline.builder();
-
-        Pipeline.Builder<String> result =
-                builder.transform(transformer1);
-
-        assertSame(builder, result);
-    }
-
-    @Test
-    void shouldReturnSameBuilderWhenAddingSink() {
-        Pipeline.Builder<String> builder = Pipeline.builder();
-
-        Pipeline.Builder<String> result =
-                builder.sink(sink1);
-
-        assertSame(builder, result);
-    }
-
-    @Test
-    void shouldProtectPipelineCollectionsFromExternalModification() {
-        Pipeline<String> pipeline = Pipeline.<String>builder()
-                .source(source)
-                .transform(transformer1)
-                .sink(sink1)
-                .build();
-
-        assertThrows(
-                UnsupportedOperationException.class,
-                () -> pipeline.getTransformers().add(transformer2)
-        );
-
-        assertThrows(
-                UnsupportedOperationException.class,
-                () -> pipeline.getSinks().add(sink2)
-        );
-    }
-
-    @Test
-    void shouldCreateIndependentPipelineSnapshot() {
-        Pipeline.Builder<String> builder = Pipeline.<String>builder()
-                .source(source)
-                .transform(transformer1)
-                .sink(sink1);
-
-        Pipeline<String> pipeline = builder.build();
-
-        builder.transform(transformer2);
-        builder.sink(sink2);
-
-        assertEquals(1, pipeline.getTransformers().size());
-        assertEquals(transformer1, pipeline.getTransformers().get(0));
-
-        assertEquals(1, pipeline.getSinks().size());
-        assertEquals(sink1, pipeline.getSinks().get(0));
+        @Override
+        public Class<?> getOutputType() {
+            return Integer.class;
+        }
     }
 }

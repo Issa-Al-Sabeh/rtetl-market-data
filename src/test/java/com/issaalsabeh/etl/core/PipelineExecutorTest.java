@@ -52,10 +52,10 @@ class PipelineExecutorTest {
         RecordingSink sink = new RecordingSink(1);
 
         Transformer<String, String> trimTransformer =
-                String::trim;
+                new TrimTransformer();
 
         Transformer<String, String> upperCaseTransformer =
-                String::toUpperCase;
+                new UpperCaseTransformer();
 
         Pipeline<String> pipeline = Pipeline.<String>builder()
                 .source(source)
@@ -85,10 +85,10 @@ class PipelineExecutorTest {
         RecordingSink sink = new RecordingSink(1);
 
         Transformer<String, String> first =
-                input -> input + "-A";
+                new AppendTransformer("-A");
 
         Transformer<String, String> second =
-                input -> input + "-B";
+                new AppendTransformer("-B");
 
         Pipeline<String> pipeline = Pipeline.<String>builder()
                 .source(source)
@@ -118,13 +118,8 @@ class PipelineExecutorTest {
         TestSource source = new TestSource("bad", "good");
         RecordingSink sink = new RecordingSink(1);
 
-        Transformer<String, String> transformer = input -> {
-            if (input.equals("bad")) {
-                throw new IllegalArgumentException("Bad event");
-            }
-
-            return input.toUpperCase();
-        };
+        Transformer<String, String> transformer =
+                new FailingOnBadTransformer();
 
         Pipeline<String> pipeline = Pipeline.<String>builder()
                 .source(source)
@@ -226,6 +221,98 @@ class PipelineExecutorTest {
 
         assertTrue(source.stopped);
         assertTrue(sink.stopped);
+    }
+
+
+    // ---------- Test Transformers ----------
+
+    private static class TrimTransformer
+            implements Transformer<String, String> {
+
+        @Override
+        public String transform(String input) {
+            return input.trim();
+        }
+
+        @Override
+        public Class<?> getInputType() {
+            return String.class;
+        }
+
+        @Override
+        public Class<?> getOutputType() {
+            return String.class;
+        }
+    }
+
+
+    private static class UpperCaseTransformer
+            implements Transformer<String, String> {
+
+        @Override
+        public String transform(String input) {
+            return input.toUpperCase();
+        }
+
+        @Override
+        public Class<?> getInputType() {
+            return String.class;
+        }
+
+        @Override
+        public Class<?> getOutputType() {
+            return String.class;
+        }
+    }
+
+
+    private static class AppendTransformer
+            implements Transformer<String, String> {
+
+        private final String suffix;
+
+        AppendTransformer(String suffix) {
+            this.suffix = suffix;
+        }
+
+        @Override
+        public String transform(String input) {
+            return input + suffix;
+        }
+
+        @Override
+        public Class<?> getInputType() {
+            return String.class;
+        }
+
+        @Override
+        public Class<?> getOutputType() {
+            return String.class;
+        }
+    }
+
+
+    private static class FailingOnBadTransformer
+            implements Transformer<String, String> {
+
+        @Override
+        public String transform(String input) {
+            if (input.equals("bad")) {
+                throw new IllegalArgumentException("Bad event");
+            }
+
+            return input.toUpperCase();
+        }
+
+        @Override
+        public Class<?> getInputType() {
+            return String.class;
+        }
+
+        @Override
+        public Class<?> getOutputType() {
+            return String.class;
+        }
     }
 
 

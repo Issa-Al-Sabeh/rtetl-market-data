@@ -23,9 +23,7 @@ public interface Transformer<I, O> {
      *
      * @return the class representing the input data type
      */
-    default Class<?> getInputType() {
-        return Object.class;
-    }
+     Class<?> getInputType();
 
     /**
      * Returns the runtime type produced by this transformer.
@@ -34,7 +32,5 @@ public interface Transformer<I, O> {
      *
      * @return the class representing the output data type
      */
-    default Class<?> getOutputType() {
-        return Object.class;
-    }
+     Class<?> getOutputType();
 }

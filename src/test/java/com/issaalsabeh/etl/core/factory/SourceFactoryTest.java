@@ -3,6 +3,7 @@ package com.issaalsabeh.etl.core.factory;
 import com.issaalsabeh.etl.config.SourceConfig;
 import com.issaalsabeh.etl.connector.kafka.KafkaSource;
 import com.issaalsabeh.etl.connector.mock.MockMarketSource;
+import com.issaalsabeh.etl.connector.mock.StringSource;
 import com.issaalsabeh.etl.core.Source;
 import com.issaalsabeh.etl.model.MarketEvent;
 import org.junit.jupiter.api.Test;
@@ -107,5 +108,22 @@ class SourceFactoryTest {
         );
     }
 
+    @Test
+    void shouldCreateStringSource() {
 
+        SourceConfig config =
+                new SourceConfig(
+                        "string",
+                        Map.of()
+                );
+
+        Source<?> source =
+                SourceFactory.create(config);
+
+        assertThat(source)
+                .isInstanceOf(StringSource.class);
+
+        assertThat(source.getOutputType())
+                .isEqualTo(String.class);
+    }
 }

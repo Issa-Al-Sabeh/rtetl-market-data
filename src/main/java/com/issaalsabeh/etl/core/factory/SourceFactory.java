@@ -4,6 +4,7 @@ import com.issaalsabeh.etl.config.SourceConfig;
 import com.issaalsabeh.etl.connector.file.FileSource;
 import com.issaalsabeh.etl.connector.kafka.KafkaSource;
 import com.issaalsabeh.etl.connector.mock.MockMarketSource;
+import com.issaalsabeh.etl.connector.mock.StringSource;
 import com.issaalsabeh.etl.core.Source;
 
 public final class SourceFactory {
@@ -22,6 +23,10 @@ public final class SourceFactory {
 
         if (type.equalsIgnoreCase("mock")) {
             return new MockMarketSource();
+        }
+
+        if (type.equalsIgnoreCase("string")) {
+            return new StringSource();
         }
 
         if (type.equalsIgnoreCase("file")) {

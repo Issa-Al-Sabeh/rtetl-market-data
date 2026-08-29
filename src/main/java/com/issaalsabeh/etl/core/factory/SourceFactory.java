@@ -5,13 +5,12 @@ import com.issaalsabeh.etl.connector.file.FileSource;
 import com.issaalsabeh.etl.connector.kafka.KafkaSource;
 import com.issaalsabeh.etl.connector.mock.MockMarketSource;
 import com.issaalsabeh.etl.core.Source;
-import com.issaalsabeh.etl.model.MarketEvent;
 
 public final class SourceFactory {
 
     private SourceFactory() {}
 
-    public static Source<MarketEvent> create(SourceConfig config) {
+    public static Source<?> create(SourceConfig config) {
 
         if (config == null) {
             throw new IllegalArgumentException(

@@ -17,10 +17,10 @@ public class Main {
         PipelineConfig config =
                 loader.load();
 
-        Pipeline<MarketEvent> pipeline =
+        Pipeline<?> pipeline =
                 PipelineFactory.create(config);
 
-        PipelineExecutor<MarketEvent> executor =
+        PipelineExecutor<?> executor =
                 new PipelineExecutor<>(pipeline);
 
         Runtime.getRuntime().addShutdownHook(

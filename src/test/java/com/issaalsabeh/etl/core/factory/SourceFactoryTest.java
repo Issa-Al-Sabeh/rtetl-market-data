@@ -22,7 +22,7 @@ class SourceFactoryTest {
                 Map.of()
         );
 
-        Source<MarketEvent> source =
+        Source<?> source =
                 SourceFactory.create(config);
 
         assertThat(source)
@@ -55,7 +55,7 @@ class SourceFactoryTest {
                 )
         );
 
-        Source<MarketEvent> source =
+        Source<?> source =
                 SourceFactory.create(config);
 
         assertThat(source)
@@ -74,7 +74,7 @@ class SourceFactoryTest {
                 )
         );
 
-        Source<MarketEvent> source =
+        Source<?> source =
                 SourceFactory.create(config);
 
         assertThat(source)

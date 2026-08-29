@@ -16,7 +16,7 @@ class PipelineTypeValidatorTest {
     @Test
     void shouldAcceptCompatibleMarketEventPipeline() {
 
-        Pipeline<MarketEvent> pipeline =
+        Pipeline<?> pipeline =
                 Pipeline.<MarketEvent>builder()
                         .source(new TestMarketSource())
                         .transform(new ValidationTransformer())
@@ -32,7 +32,7 @@ class PipelineTypeValidatorTest {
     @Test
     void shouldAcceptCompatibleEnrichedMarketEventPipeline() {
 
-        Pipeline<MarketEvent> pipeline =
+        Pipeline<?> pipeline =
                 Pipeline.<MarketEvent>builder()
                         .source(new TestMarketSource())
                         .transform(new ValidationTransformer())
@@ -49,7 +49,7 @@ class PipelineTypeValidatorTest {
     @Test
     void shouldRejectIncompatibleSinkType() {
 
-        Pipeline<MarketEvent> pipeline =
+        Pipeline<?> pipeline =
                 new Pipeline<>(new TestMarketSource());
 
         pipeline.addTransformer(
@@ -70,7 +70,7 @@ class PipelineTypeValidatorTest {
     @Test
     void shouldRejectIncompatibleTransformerType() {
 
-        Pipeline<MarketEvent> pipeline =
+        Pipeline<?> pipeline =
                 new Pipeline<>(new TestMarketSource());
 
         pipeline.addTransformer(

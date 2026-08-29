@@ -5,7 +5,6 @@ import com.issaalsabeh.etl.config.PipelineConfigValidator;
 import com.issaalsabeh.etl.config.SinkConfig;
 import com.issaalsabeh.etl.config.SourceConfig;
 import com.issaalsabeh.etl.core.*;
-import com.issaalsabeh.etl.model.MarketEvent;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -15,29 +14,23 @@ public final class PipelineFactory {
     private PipelineFactory() {
     }
 
-    public static Pipeline<MarketEvent> create(PipelineConfig config){
+    public static Pipeline<?> create(PipelineConfig config){
 
         PipelineConfigValidator.validate(config);
 
-        Source<MarketEvent> source = createSource(config);
+        Source<?> source = createSource(config);
         List<Transformer<?, ?>> transformers = createTransformers(config);
         List<Sink<?>> sinks = createSinks(config);
 
-        Pipeline.Builder<MarketEvent> builder = Pipeline.<MarketEvent>builder().source(source);
-
-        for (Transformer<?, ?> transformer : transformers) {
-            builder.transform(transformer);
-        }
-
-        for (Sink<?> sink : sinks) {
-            builder.sink(sink);
-        }
-
-        return builder.build();
+        return buildPipeline(
+                source,
+                transformers,
+                sinks
+        );
 
     }
 
-    private static Source<MarketEvent> createSource(PipelineConfig config) {
+    private static Source<?> createSource(PipelineConfig config) {
 
         PipelineConfig.ConnectorConfig yamlSource =
                 config.getPipeline().getSource();
@@ -87,5 +80,25 @@ public final class PipelineFactory {
         }
 
         return sinks;
+    }
+
+    private static <T> Pipeline<T> buildPipeline(
+            Source<T> source,
+            List<Transformer<?, ?>> transformers,
+            List<Sink<?>> sinks) {
+
+        Pipeline.Builder<T> builder =
+                Pipeline.<T>builder()
+                        .source(source);
+
+        for (Transformer<?, ?> transformer : transformers) {
+            builder.transform(transformer);
+        }
+
+        for (Sink<?> sink : sinks) {
+            builder.sink(sink);
+        }
+
+        return builder.build();
     }
 }

@@ -5,7 +5,6 @@ import com.issaalsabeh.etl.config.PipelineConfigLoader;
 import com.issaalsabeh.etl.core.Pipeline;
 import com.issaalsabeh.etl.core.PipelineExecutor;
 import com.issaalsabeh.etl.core.factory.PipelineFactory;
-import com.issaalsabeh.etl.model.MarketEvent;
 
 public class Main {
 

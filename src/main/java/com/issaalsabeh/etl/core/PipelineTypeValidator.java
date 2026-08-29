@@ -1,7 +1,5 @@
 package com.issaalsabeh.etl.core;
 
-import com.issaalsabeh.etl.config.PipelineConfig;
-
 import java.util.List;
 
 public class PipelineTypeValidator {
@@ -14,7 +12,7 @@ public class PipelineTypeValidator {
         List<Transformer<?,?>> pipelineTransformers = pipeline.getTransformers();
 
         for (Transformer<?, ?> transformer : pipelineTransformers) {
-            if (transformer.getInputType() != currentType){
+            if (!transformer.getInputType().isAssignableFrom(currentType)){
                 throw new IllegalArgumentException(
                         "Pipeline type mismatch: " +
                         transformer.getClass().getSimpleName() +
@@ -32,7 +30,7 @@ public class PipelineTypeValidator {
         List<Sink<?>> pipelineSinks = pipeline.getSinks();
 
         for (Sink<?> sink : pipelineSinks) {
-            if(sink.getInputType() != currentType){
+            if(!sink.getInputType().isAssignableFrom(currentType)){
                 throw new IllegalArgumentException(
                         "Pipeline type mismatch: sink " +
                         sink.getClass().getSimpleName() +

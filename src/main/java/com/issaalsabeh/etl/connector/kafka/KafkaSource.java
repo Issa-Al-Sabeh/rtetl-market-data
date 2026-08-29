@@ -2,7 +2,6 @@ package com.issaalsabeh.etl.connector.kafka;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.issaalsabeh.etl.connector.file.FileSource;
 import com.issaalsabeh.etl.core.Source;
 import com.issaalsabeh.etl.model.MarketEvent;
 import org.apache.kafka.clients.consumer.ConsumerRecord;

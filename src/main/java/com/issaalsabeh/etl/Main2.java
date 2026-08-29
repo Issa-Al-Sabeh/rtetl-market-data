@@ -15,39 +15,5 @@ public class Main2 {
 
     public static void main(String[] args) {
 
-        SourceConfig sourceConfig =
-                new SourceConfig(
-                        "file",
-                        Map.of(
-                                "path",
-                                "data/market-events.jsonl"
-                        )
-                );
-
-        Source<?> source =
-                SourceFactory.create(sourceConfig);
-
-        Pipeline<?> pipeline =
-                buildPipeline(source);
-
-        PipelineExecutor<?> executor =
-                new PipelineExecutor<>(pipeline);
-
-        Runtime.getRuntime().addShutdownHook(
-                new Thread(executor::stop)
-        );
-
-        executor.start();
-    }
-
-    private static <T> Pipeline<T> buildPipeline(
-            Source<T> source) {
-
-        return Pipeline.<T>builder()
-                .source(source)
-                .transform(new ValidationTransformer())
-                .transform(new PriceNormalizationTransformer())
-                .sink(new ConsoleSink())
-                .build();
     }
 }

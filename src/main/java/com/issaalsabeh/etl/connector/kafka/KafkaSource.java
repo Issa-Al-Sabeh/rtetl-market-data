@@ -17,8 +17,10 @@ import java.util.Properties;
 import java.util.Queue;
 
 public class KafkaSource implements Source<MarketEvent> {
+    private final String bootstrapServers;
     private final String topic;
-    KafkaConsumer<String, String> kafkaConsumer;
+    private final String groupId;
+    private KafkaConsumer<String, String> kafkaConsumer;
     private final Queue<ConsumerRecord<String, String>> queue = new LinkedList<>();
     private final ObjectMapper objectMapper;
     private static final Logger logger =
@@ -37,7 +39,15 @@ public class KafkaSource implements Source<MarketEvent> {
             String topic,
             String groupId
     ){
+        this.bootstrapServers = bootstrapServers;
         this.topic = topic;
+        this.groupId = groupId;
+
+        objectMapper = new ObjectMapper();
+        objectMapper.findAndRegisterModules();
+    }
+    @Override
+    public void start() {
 
         Properties properties = new Properties();
 
@@ -63,16 +73,17 @@ public class KafkaSource implements Source<MarketEvent> {
 
         kafkaConsumer = new KafkaConsumer<>(properties);
 
-        objectMapper = new ObjectMapper();
-        objectMapper.findAndRegisterModules();
-    }
-    @Override
-    public void start() {
         kafkaConsumer.subscribe(Collections.singleton(topic));
     }
 
     @Override
     public MarketEvent poll() {
+
+        if (kafkaConsumer == null) {
+            throw new IllegalStateException(
+                    "Source is not running"
+            );
+        }
 
         if (queue.isEmpty()){
             ConsumerRecords<String, String> records =

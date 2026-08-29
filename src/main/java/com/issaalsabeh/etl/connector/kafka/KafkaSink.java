@@ -3,14 +3,18 @@ package com.issaalsabeh.etl.connector.kafka;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.issaalsabeh.etl.core.Sink;
-import com.issaalsabeh.etl.model.MarketEvent;
+import com.issaalsabeh.etl.model.EnrichedMarketEvent;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Properties;
 
-public class KafkaSink implements Sink<MarketEvent> {
+public class KafkaSink implements Sink<EnrichedMarketEvent> {
 
+    private static final Logger logger =
+            LoggerFactory.getLogger(KafkaSink.class);
     private final String bootstrapServers;
     private final String topic;
 
@@ -43,6 +47,12 @@ public class KafkaSink implements Sink<MarketEvent> {
     @Override
     public void start() {
 
+        if (kafkaProducer != null) {
+            throw new IllegalStateException(
+                    "Sink is already running"
+            );
+        }
+
         Properties properties = new Properties();
 
         properties.put(
@@ -64,7 +74,7 @@ public class KafkaSink implements Sink<MarketEvent> {
     }
 
     @Override
-    public void write(MarketEvent data) {
+    public void write(EnrichedMarketEvent data) {
 
         if (kafkaProducer == null) {
             throw new IllegalStateException(
@@ -83,11 +93,20 @@ public class KafkaSink implements Sink<MarketEvent> {
                             json
                     );
 
-            kafkaProducer.send(record);
+            kafkaProducer.send(record, (metadata, exception) -> {
+                if (exception != null) {
+                    logger.error(
+                            "Failed to publish event {} to Kafka topic {}",
+                            data.eventId(),
+                            topic,
+                            exception
+                    );
+                }
+            });
 
         } catch (JsonProcessingException e) {
             throw new IllegalArgumentException(
-                    "Failed to serialize market event: "
+                    "Failed to serialize enriched market event: "
                             + data.eventId(),
                     e
             );
@@ -106,6 +125,6 @@ public class KafkaSink implements Sink<MarketEvent> {
 
     @Override
     public Class<?> getInputType() {
-        return MarketEvent.class;
+        return EnrichedMarketEvent.class;
     }
 }

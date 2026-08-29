@@ -1,8 +1,10 @@
 pipeline:
   source:
-    type: file
+    type: kafka
     properties:
-      path: data/market-events.jsonl
+      bootstrap.servers: localhost:9092
+      topic: market-data
+      group.id: market-data-etl
 
   transformations:
     - validate
@@ -10,5 +12,7 @@ pipeline:
     - enrich
 
   sinks:
-    - type: enriched-console
-      properties: {}
+    - type: kafka
+      properties:
+        bootstrap.servers: localhost:9092
+        topic: market-data-processed

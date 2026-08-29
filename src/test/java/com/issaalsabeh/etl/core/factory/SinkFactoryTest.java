@@ -6,7 +6,7 @@ import com.issaalsabeh.etl.connector.console.EnrichedConsoleSink;
 import com.issaalsabeh.etl.connector.kafka.KafkaSink;
 import com.issaalsabeh.etl.connector.postgres.PostgresSink;
 import com.issaalsabeh.etl.core.Sink;
-import com.issaalsabeh.etl.model.MarketEvent;
+import com.issaalsabeh.etl.model.EnrichedMarketEvent;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
@@ -71,7 +71,7 @@ public class SinkFactoryTest {
                 "kafka",
                 Map.of(
                         "bootstrap.servers", "localhost:9092",
-                        "topic", "processed-market-data"
+                        "topic", "market-data-processed"
                 )
         );
 
@@ -80,6 +80,9 @@ public class SinkFactoryTest {
 
         assertThat(sink)
                 .isInstanceOf(KafkaSink.class);
+
+        assertThat(sink.getInputType())
+                .isEqualTo(EnrichedMarketEvent.class);
     }
 
     @Test
@@ -96,5 +99,37 @@ public class SinkFactoryTest {
 
         assertThat(sink)
                 .isInstanceOf(EnrichedConsoleSink.class);
+    }
+
+    @Test
+    void shouldRejectKafkaSinkWithMissingTopic() {
+
+        SinkConfig config = new SinkConfig(
+                "kafka",
+                Map.of(
+                        "bootstrap.servers", "localhost:9092"
+                )
+        );
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> SinkFactory.create(config)
+        );
+    }
+
+    @Test
+    void shouldRejectKafkaSinkWithMissingBootstrapServers() {
+
+        SinkConfig config = new SinkConfig(
+                "kafka",
+                Map.of(
+                        "topic", "market-data-processed"
+                )
+        );
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> SinkFactory.create(config)
+        );
     }
 }

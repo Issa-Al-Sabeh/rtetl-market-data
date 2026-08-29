@@ -4,8 +4,13 @@ import com.issaalsabeh.etl.config.PipelineConfig;
 import com.issaalsabeh.etl.config.PipelineConfigLoader;
 import com.issaalsabeh.etl.connector.console.ConsoleSink;
 import com.issaalsabeh.etl.connector.file.FileSource;
+import com.issaalsabeh.etl.connector.kafka.KafkaSink;
+import com.issaalsabeh.etl.connector.kafka.KafkaSource;
 import com.issaalsabeh.etl.core.Pipeline;
+import com.issaalsabeh.etl.core.Sink;
+import com.issaalsabeh.etl.model.EnrichedMarketEvent;
 import com.issaalsabeh.etl.model.MarketEvent;
+import com.issaalsabeh.etl.transformations.EnrichmentTransformer;
 import com.issaalsabeh.etl.transformations.PriceNormalizationTransformer;
 import com.issaalsabeh.etl.transformations.ValidationTransformer;
 import org.junit.jupiter.api.Test;
@@ -81,5 +86,57 @@ class PipelineFactoryTest {
         )
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("type mismatch");
+    }
+
+    @Test
+    void shouldBuildProductionPipelineConfiguration() {
+
+        PipelineConfigLoader loader =
+                new PipelineConfigLoader();
+
+        PipelineConfig config =
+                loader.load("pipeline.yaml");
+
+        Pipeline<?> pipeline =
+                PipelineFactory.create(config);
+
+        try {
+            assertThat(pipeline.getSource())
+                    .isInstanceOf(KafkaSource.class);
+
+            assertThat(pipeline.getSource().getOutputType())
+                    .isEqualTo(MarketEvent.class);
+
+            assertThat(pipeline.getTransformers())
+                    .hasSize(3);
+
+            assertThat(pipeline.getTransformers().get(0))
+                    .isInstanceOf(ValidationTransformer.class);
+
+            assertThat(pipeline.getTransformers().get(1))
+                    .isInstanceOf(PriceNormalizationTransformer.class);
+
+            assertThat(pipeline.getTransformers().get(2))
+                    .isInstanceOf(EnrichmentTransformer.class);
+
+            assertThat(pipeline.getTransformers().get(2).getOutputType())
+                    .isEqualTo(EnrichedMarketEvent.class);
+
+            assertThat(pipeline.getSinks())
+                    .hasSize(1);
+
+            assertThat(pipeline.getSinks().get(0))
+                    .isInstanceOf(KafkaSink.class);
+
+            assertThat(pipeline.getSinks().get(0).getInputType())
+                    .isEqualTo(EnrichedMarketEvent.class);
+
+        } finally {
+            pipeline.getSource().stop();
+
+            for (Sink<?> sink : pipeline.getSinks()) {
+                sink.stop();
+            }
+        }
     }
 }

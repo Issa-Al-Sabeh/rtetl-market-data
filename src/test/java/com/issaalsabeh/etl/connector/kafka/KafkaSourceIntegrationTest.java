@@ -18,6 +18,7 @@ import java.util.UUID;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.junit.jupiter.api.Assertions.*;
 
 class KafkaSourceIntegrationTest {
@@ -195,6 +196,90 @@ class KafkaSourceIntegrationTest {
         assertEquals(
                 "MSFT",
                 receivedEvent.symbol()
+        );
+    }
+
+    @Test
+    void shouldPreserveEventIdAcrossDuplicateKafkaDelivery() throws Exception {
+
+        UUID eventId = UUID.randomUUID();
+
+        MarketEvent event = new MarketEvent(
+                eventId,
+                "AAPL",
+                new BigDecimal("150.2500"),
+                1000L,
+                Instant.parse("2026-08-31T00:00:00Z")
+        );
+
+        String json = objectMapper.writeValueAsString(event);
+
+        producer.send(
+                new ProducerRecord<>(
+                        testTopic,
+                        event.symbol(),
+                        json
+                )
+        ).get();
+
+        producer.send(
+                new ProducerRecord<>(
+                        testTopic,
+                        event.symbol(),
+                        json
+                )
+        ).get();
+
+        producer.flush();
+
+        KafkaSource source = new KafkaSource(
+                "localhost:9092",
+                testTopic,
+                "duplicate-test-" + UUID.randomUUID(),
+                "earliest"
+        );
+
+        try {
+            source.start();
+
+            MarketEvent first = waitForEventWithId(source, eventId);
+            MarketEvent second = waitForEventWithId(source, eventId);
+
+            assertThat(first).isNotNull();
+            assertThat(second).isNotNull();
+
+            assertThat(first.eventId())
+                    .isEqualTo(eventId);
+
+            assertThat(second.eventId())
+                    .isEqualTo(eventId);
+
+            assertThat(first)
+                    .isEqualTo(second);
+
+        } finally {
+            source.stop();
+        }
+    }
+
+    private MarketEvent waitForEventWithId(
+            KafkaSource source,
+            UUID eventId
+    ) {
+
+        long deadline = System.currentTimeMillis() + 10_000;
+
+        while (System.currentTimeMillis() < deadline) {
+
+            MarketEvent event = source.poll();
+
+            if (event != null && event.eventId().equals(eventId)) {
+                return event;
+            }
+        }
+
+        throw new AssertionError(
+                "Timed out waiting for event with ID: " + eventId
         );
     }
 

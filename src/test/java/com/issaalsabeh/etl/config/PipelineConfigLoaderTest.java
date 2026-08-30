@@ -3,6 +3,7 @@ package com.issaalsabeh.etl.config;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class PipelineConfigLoaderTest {
 
@@ -50,5 +51,19 @@ class PipelineConfigLoaderTest {
                 .get(0)
                 .getProperties())
                 .isEmpty();
+    }
+
+    @Test
+    void shouldFailWhenEnvironmentVariableIsMissing() {
+
+        PipelineConfigLoader loader = new PipelineConfigLoader();
+
+        assertThatThrownBy(
+                () -> loader.load("pipeline-missing-env-test.yaml")
+        )
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(
+                        "Environment variable is not defined"
+                );
     }
 }

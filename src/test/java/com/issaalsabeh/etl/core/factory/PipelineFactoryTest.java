@@ -7,6 +7,7 @@ import com.issaalsabeh.etl.connector.console.EnrichedConsoleSink;
 import com.issaalsabeh.etl.connector.file.FileSource;
 import com.issaalsabeh.etl.connector.kafka.KafkaSink;
 import com.issaalsabeh.etl.connector.kafka.KafkaSource;
+import com.issaalsabeh.etl.connector.postgres.PostgresSink;
 import com.issaalsabeh.etl.connector.redis.RedisSink;
 import com.issaalsabeh.etl.core.Pipeline;
 import com.issaalsabeh.etl.core.Sink;
@@ -125,7 +126,7 @@ class PipelineFactoryTest {
                     .isEqualTo(EnrichedMarketEvent.class);
 
             assertThat(pipeline.getSinks())
-                    .hasSize(2);
+                    .hasSize(3);
 
             assertThat(pipeline.getSinks().get(0))
                     .isInstanceOf(KafkaSink.class);
@@ -137,6 +138,12 @@ class PipelineFactoryTest {
                     .isInstanceOf(RedisSink.class);
 
             assertThat(pipeline.getSinks().get(1).getInputType())
+                    .isEqualTo(EnrichedMarketEvent.class);
+
+            assertThat(pipeline.getSinks().get(2))
+                    .isInstanceOf(PostgresSink.class);
+
+            assertThat(pipeline.getSinks().get(2).getInputType())
                     .isEqualTo(EnrichedMarketEvent.class);
 
         } finally {

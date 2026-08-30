@@ -1,0 +1,22 @@
+pipeline:
+  source:
+    type: file
+    properties:
+      path: data/market-events.jsonl
+
+  transformations:
+    - validate
+    - normalize
+
+  sinks:
+    - type: postgres
+      properties:
+        url: jdbc:postgresql://localhost:5432/market_data
+        username: test_user
+        password: ${THIS_VARIABLE_SHOULD_NOT_EXIST}
+
+  deadLetterQueue:
+    type: kafka
+    properties:
+      bootstrap.servers: localhost:9092
+      topic: market-data-dlq

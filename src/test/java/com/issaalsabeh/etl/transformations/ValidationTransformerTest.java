@@ -7,6 +7,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.*;
 
 public class ValidationTransformerTest {
@@ -136,5 +137,20 @@ public class ValidationTransformerTest {
         assertDoesNotThrow(
                 () -> transformer.transform(event)
         );
+    }
+
+    @Test
+    void shouldRejectEventWithNullEventId() {
+        MarketEvent event = new MarketEvent(
+                null,
+                "AAPL",
+                new BigDecimal("150.25"),
+                1000,
+                Instant.now()
+        );
+
+        assertThatThrownBy(() -> transformer.transform(event))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Event ID");
     }
 }

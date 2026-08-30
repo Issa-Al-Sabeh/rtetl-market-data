@@ -10,6 +10,10 @@ public class ValidationTransformer implements Transformer<MarketEvent, MarketEve
             throw new IllegalArgumentException("Market event cannot be null");
         }
 
+        if (event.eventId() == null) {
+            throw new IllegalArgumentException("Event ID cannot be null");
+        }
+
         if(event.symbol() == null || event.symbol().isBlank()){
             throw new IllegalArgumentException("Symbol cannot be missing");
         }

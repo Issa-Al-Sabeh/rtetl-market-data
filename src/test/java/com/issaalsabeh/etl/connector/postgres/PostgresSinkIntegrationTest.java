@@ -1,6 +1,6 @@
 package com.issaalsabeh.etl.connector.postgres;
 
-import com.issaalsabeh.etl.model.MarketEvent;
+import com.issaalsabeh.etl.model.EnrichedMarketEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -47,6 +47,7 @@ class PostgresSinkIntegrationTest {
                         price NUMERIC(19,4) NOT NULL,
                         volume BIGINT NOT NULL,
                         timestamp TIMESTAMPTZ NOT NULL,
+                        notional_value NUMERIC NOT NULL,
                         processed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
                     )
                     """);
@@ -56,16 +57,17 @@ class PostgresSinkIntegrationTest {
     }
 
     @Test
-    void shouldInsertMarketEventIntoPostgres() throws Exception {
+    void shouldInsertEnrichedMarketEventIntoPostgres() throws Exception {
 
         PostgresSink sink = createSink();
 
-        MarketEvent event = new MarketEvent(
+        EnrichedMarketEvent event = new EnrichedMarketEvent(
                 UUID.randomUUID(),
                 "AAPL",
                 new BigDecimal("182.4500"),
                 5000L,
-                Instant.parse("2026-08-25T18:30:45.123456Z")
+                Instant.parse("2026-08-25T18:30:45.123456Z"),
+                new BigDecimal("912250.0000")
         );
 
         try {
@@ -80,7 +82,13 @@ class PostgresSinkIntegrationTest {
                     );
                     PreparedStatement statement = connection.prepareStatement(
                             """
-                            SELECT event_id, symbol, price, volume, timestamp, processed_at
+                            SELECT event_id,
+                                   symbol,
+                                   price,
+                                   volume,
+                                   timestamp,
+                                   notional_value,
+                                   processed_at
                             FROM market_events
                             WHERE event_id = ?
                             """
@@ -108,6 +116,9 @@ class PostgresSinkIntegrationTest {
                     assertThat(resultSet.getTimestamp("timestamp").toInstant())
                             .isEqualTo(event.timestamp());
 
+                    assertThat(resultSet.getBigDecimal("notional_value"))
+                            .isEqualByComparingTo(event.notionalValue());
+
                     assertThat(resultSet.getTimestamp("processed_at"))
                             .isNotNull();
 
@@ -125,7 +136,7 @@ class PostgresSinkIntegrationTest {
 
         PostgresSink sink = createSink();
 
-        MarketEvent event = createEvent();
+        EnrichedMarketEvent event = createEvent();
 
         assertThatThrownBy(() -> sink.write(event))
                 .isInstanceOf(IllegalStateException.class)
@@ -133,28 +144,48 @@ class PostgresSinkIntegrationTest {
     }
 
     @Test
-    void shouldThrowExceptionForDuplicateEventId() {
+    void shouldStoreOnlyOneRecordWhenSameEventIsWrittenTwice() throws Exception {
 
         PostgresSink sink = createSink();
 
-        UUID eventId = UUID.randomUUID();
-
-        MarketEvent event = new MarketEvent(
-                eventId,
+        EnrichedMarketEvent event = new EnrichedMarketEvent(
+                UUID.randomUUID(),
                 "MSFT",
                 new BigDecimal("250.0000"),
                 1000L,
-                Instant.parse("2026-08-25T18:30:45Z")
+                Instant.parse("2026-08-25T18:30:45Z"),
+                new BigDecimal("250000.0000")
         );
 
         try {
             sink.start();
 
             sink.write(event);
+            sink.write(event);
 
-            assertThatThrownBy(() -> sink.write(event))
-                    .isInstanceOf(RuntimeException.class)
-                    .hasMessageContaining("Failed to insert market event");
+            try (
+                    Connection connection = DriverManager.getConnection(
+                            POSTGRES.getJdbcUrl(),
+                            POSTGRES.getUsername(),
+                            POSTGRES.getPassword()
+                    );
+                    PreparedStatement statement = connection.prepareStatement(
+                            """
+                            SELECT COUNT(*)
+                            FROM market_events
+                            WHERE event_id = ?
+                            """
+                    )
+            ) {
+
+                statement.setObject(1, event.eventId());
+
+                try (ResultSet resultSet = statement.executeQuery()) {
+
+                    assertThat(resultSet.next()).isTrue();
+                    assertThat(resultSet.getInt(1)).isEqualTo(1);
+                }
+            }
 
         } finally {
             sink.stop();
@@ -185,13 +216,14 @@ class PostgresSinkIntegrationTest {
         );
     }
 
-    private MarketEvent createEvent() {
-        return new MarketEvent(
+    private EnrichedMarketEvent createEvent() {
+        return new EnrichedMarketEvent(
                 UUID.randomUUID(),
                 "TSLA",
                 new BigDecimal("300.0000"),
                 2000L,
-                Instant.parse("2026-08-25T18:30:45Z")
+                Instant.parse("2026-08-25T18:30:45Z"),
+                new BigDecimal("600000.0000")
         );
     }
 }

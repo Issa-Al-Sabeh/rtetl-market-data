@@ -1,13 +1,14 @@
 package com.issaalsabeh.etl.connector.postgres;
 
 import com.issaalsabeh.etl.core.Sink;
+import com.issaalsabeh.etl.model.EnrichedMarketEvent;
 import com.issaalsabeh.etl.model.MarketEvent;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 
 import java.sql.*;
 
-public class PostgresSink implements Sink<MarketEvent> {
+public class PostgresSink implements Sink<EnrichedMarketEvent> {
     private HikariDataSource dataSource;
     private final String url;
     private final String username;
@@ -19,9 +20,11 @@ public class PostgresSink implements Sink<MarketEvent> {
             symbol,
             price,
             volume,
-            timestamp
+            timestamp,
+            notional_value
         )
-        VALUES (?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT (event_id) DO NOTHING
         """;
 
     public PostgresSink(String url, String username, String password){
@@ -52,7 +55,7 @@ public class PostgresSink implements Sink<MarketEvent> {
     }
 
     @Override
-    public void write(MarketEvent event) {
+    public void write(EnrichedMarketEvent event) {
         if (dataSource == null) {
             throw new IllegalStateException("PostgresSink has not been started");
         }
@@ -68,6 +71,7 @@ public class PostgresSink implements Sink<MarketEvent> {
             statement.setBigDecimal(3, event.price());
             statement.setLong(4, event.volume());
             statement.setTimestamp(5, Timestamp.from(event.timestamp()));
+            statement.setBigDecimal(6, event.notionalValue());
 
             statement.executeUpdate();
 
@@ -97,6 +101,6 @@ public class PostgresSink implements Sink<MarketEvent> {
 
     @Override
     public Class<?> getInputType() {
-        return MarketEvent.class;
+        return EnrichedMarketEvent.class;
     }
 }

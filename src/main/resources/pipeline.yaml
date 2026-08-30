@@ -22,6 +22,11 @@ pipeline:
         host: 127.0.0.1
         port: 6379
 
+    - type: postgres
+      properties:
+        url: jdbc:postgresql://localhost:5432/${POSTGRES_DB}
+        username: ${POSTGRES_USER}
+        password: ${POSTGRES_PASSWORD}
   deadLetterQueue:
     type: kafka
     properties:

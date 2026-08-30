@@ -63,6 +63,9 @@ public class SinkFactoryTest {
 
         assertThat(sink)
                 .isInstanceOf(PostgresSink.class);
+
+        assertThat(sink.getInputType())
+                .isEqualTo(EnrichedMarketEvent.class);
     }
 
     @Test

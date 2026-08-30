@@ -20,6 +20,7 @@ public class PipelineConfig {
         private ConnectorConfig source;
         private List<String> transformations;
         private List<ConnectorConfig> sinks;
+        private ConnectorConfig deadLetterQueue;
 
         public ConnectorConfig getSource() {
             return source;
@@ -44,6 +45,10 @@ public class PipelineConfig {
         public void setSinks(List<ConnectorConfig> sinks) {
             this.sinks = sinks;
         }
+
+        public ConnectorConfig getDeadLetterQueue() {return deadLetterQueue;}
+
+        public void setDeadLetterQueue(ConnectorConfig deadLetterQueue) {this.deadLetterQueue = deadLetterQueue;}
     }
 
     public static class ConnectorConfig {

@@ -21,3 +21,9 @@ pipeline:
       properties:
         host: 127.0.0.1
         port: 6379
+
+  deadLetterQueue:
+    type: kafka
+    properties:
+      bootstrap.servers: localhost:9092
+      topic: market-data-dlq

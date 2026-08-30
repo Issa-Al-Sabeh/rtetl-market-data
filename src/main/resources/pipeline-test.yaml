@@ -11,3 +11,9 @@ pipeline:
   sinks:
     - type: console
       properties: {}
+
+  deadLetterQueue:
+    type: kafka
+    properties:
+      bootstrap.servers: localhost:9092
+      topic: market-data-dlq

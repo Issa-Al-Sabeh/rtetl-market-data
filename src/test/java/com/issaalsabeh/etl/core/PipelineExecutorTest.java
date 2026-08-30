@@ -1,5 +1,7 @@
 package com.issaalsabeh.etl.core;
 
+import com.issaalsabeh.etl.core.dlq.DeadLetterQueue;
+import com.issaalsabeh.etl.core.dlq.DeadLetterRecord;
 import com.issaalsabeh.etl.core.retry.RetryPolicy;
 import org.junit.jupiter.api.Test;
 
@@ -332,7 +334,154 @@ class PipelineExecutorTest {
                 .isFalse();
     }
 
+    @Test
+    void shouldSendPermanentlyFailedEventToDlq()
+            throws InterruptedException {
 
+        TestSource source =
+                new TestSource("hello");
+
+        RetryableFailingSink failingSink =
+                new RetryableFailingSink(100);
+
+        RecordingDeadLetterQueue deadLetterQueue =
+                new RecordingDeadLetterQueue();
+
+        Pipeline<String> pipeline =
+                Pipeline.<String>builder()
+                        .source(source)
+                        .sink(failingSink)
+                        .build();
+
+        RetryPolicy retryPolicy =
+                new RetryPolicy(
+                        3,
+                        0,
+                        2.0,
+                        0
+                );
+
+        PipelineExecutor<String> executor =
+                new PipelineExecutor<>(
+                        pipeline,
+                        retryPolicy,
+                        deadLetterQueue
+                );
+
+        Thread thread =
+                new Thread(executor::start);
+
+        thread.start();
+
+        assertTrue(
+                deadLetterQueue.awaitRecord()
+        );
+
+        executor.stop();
+        thread.join(2_000);
+
+        assertEquals(
+                3,
+                failingSink.getAttempts()
+        );
+
+        assertEquals(
+                1,
+                deadLetterQueue.getRecords().size()
+        );
+
+        DeadLetterRecord record =
+                deadLetterQueue.getRecords().get(0);
+
+        assertEquals(
+                "hello",
+                record.originalEvent()
+        );
+
+        assertEquals(
+                "RetryableFailingSink",
+                record.failedSink()
+        );
+
+        assertEquals(
+                RuntimeException.class.getName(),
+                record.errorType()
+        );
+
+        assertEquals(
+                "Simulated sink failure",
+                record.errorMessage()
+        );
+
+        assertNotNull(
+                record.failureTimestamp()
+        );
+
+        assertEquals(
+                2,
+                record.retryCount()
+        );
+    }
+
+    @Test
+    void shouldNotSendRecoveredEventToDlq()
+            throws InterruptedException {
+
+        TestSource source =
+                new TestSource("hello");
+
+        RetryableFailingSink recoveringSink =
+                new RetryableFailingSink(2);
+
+        RecordingDeadLetterQueue deadLetterQueue =
+                new RecordingDeadLetterQueue();
+
+        Pipeline<String> pipeline =
+                Pipeline.<String>builder()
+                        .source(source)
+                        .sink(recoveringSink)
+                        .build();
+
+        RetryPolicy retryPolicy =
+                new RetryPolicy(
+                        3,
+                        0,
+                        2.0,
+                        0
+                );
+
+        PipelineExecutor<String> executor =
+                new PipelineExecutor<>(
+                        pipeline,
+                        retryPolicy,
+                        deadLetterQueue
+                );
+
+        Thread thread =
+                new Thread(executor::start);
+
+        thread.start();
+
+        long deadline =
+                System.currentTimeMillis() + 2_000;
+
+        while (recoveringSink.getAttempts() < 3
+                && System.currentTimeMillis() < deadline) {
+            Thread.yield();
+        }
+
+        executor.stop();
+        thread.join(2_000);
+
+        assertEquals(
+                3,
+                recoveringSink.getAttempts()
+        );
+
+        assertTrue(
+                deadLetterQueue.getRecords().isEmpty()
+        );
+    }
 
     // ---------- Test Transformers ----------
 
@@ -648,6 +797,45 @@ class PipelineExecutorTest {
         @Override
         public Class<?> getOutputType() {
             return String.class;
+        }
+    }
+
+    // ---------- Recording Dead Letter Queue ----------
+
+    private static class RecordingDeadLetterQueue
+            implements DeadLetterQueue {
+
+        private final CopyOnWriteArrayList<DeadLetterRecord> records =
+                new CopyOnWriteArrayList<>();
+
+        private final CountDownLatch recordLatch =
+                new CountDownLatch(1);
+
+        @Override
+        public void start() {
+        }
+
+        @Override
+        public void publish(DeadLetterRecord record) {
+            records.add(record);
+            recordLatch.countDown();
+        }
+
+        @Override
+        public void stop() {
+        }
+
+        boolean awaitRecord()
+                throws InterruptedException {
+
+            return recordLatch.await(
+                    2,
+                    TimeUnit.SECONDS
+            );
+        }
+
+        CopyOnWriteArrayList<DeadLetterRecord> getRecords() {
+            return records;
         }
     }
 }

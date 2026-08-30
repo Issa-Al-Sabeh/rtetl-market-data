@@ -1,8 +1,13 @@
 package com.issaalsabeh.etl.core;
 
+import com.issaalsabeh.etl.core.dlq.DeadLetterQueue;
+import com.issaalsabeh.etl.core.dlq.DeadLetterRecord;
+import com.issaalsabeh.etl.core.dlq.NoOpDeadLetterQueue;
 import com.issaalsabeh.etl.core.retry.RetryPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.time.Instant;
 
 public class PipelineExecutor<T> {
 
@@ -15,16 +20,31 @@ public class PipelineExecutor<T> {
 
     private final RetryPolicy retryPolicy;
 
+    private final DeadLetterQueue deadLetterQueue;
+
     public PipelineExecutor(Pipeline<T> pipeline) {
         this(
                 pipeline,
-                RetryPolicy.defaultPolicy()
+                RetryPolicy.defaultPolicy(),
+                new NoOpDeadLetterQueue()
         );
     }
 
     public PipelineExecutor(
             Pipeline<T> pipeline,
             RetryPolicy retryPolicy
+    ) {
+        this(
+                pipeline,
+                retryPolicy,
+                new NoOpDeadLetterQueue()
+        );
+    }
+
+    public PipelineExecutor(
+            Pipeline<T> pipeline,
+            RetryPolicy retryPolicy,
+            DeadLetterQueue deadLetterQueue
     ) {
         if (pipeline == null) {
             throw new IllegalArgumentException(
@@ -38,24 +58,36 @@ public class PipelineExecutor<T> {
             );
         }
 
+        if (deadLetterQueue == null) {
+            throw new IllegalArgumentException(
+                    "Dead letter queue cannot be null"
+            );
+        }
+
         this.pipeline = pipeline;
         this.retryPolicy = retryPolicy;
+        this.deadLetterQueue = deadLetterQueue;
         this.running = false;
     }
 
     public void start() {
+
         pipeline.validate();
 
-        pipeline.getSource().start();
+        try {
 
-        for (Sink<?> sink : pipeline.getSinks()) {
-            sink.start();
-        }
+            pipeline.getSource().start();
 
-        running = true;
+            deadLetterQueue.start();
 
-        try{
+            for (Sink<?> sink : pipeline.getSinks()) {
+                sink.start();
+            }
+
+            running = true;
+
             while (running) {
+
                 T event = pipeline.getSource().poll();
 
                 if (event == null) {
@@ -65,30 +97,46 @@ public class PipelineExecutor<T> {
                 Object current = event;
 
                 try {
-                    for (Transformer<?, ?> transformer : pipeline.getTransformers()) {
+
+                    for (Transformer<?, ?> transformer
+                            : pipeline.getTransformers()) {
+
                         @SuppressWarnings("unchecked")
                         Transformer<Object, Object> typedTransformer =
                                 (Transformer<Object, Object>) transformer;
 
-                        current = typedTransformer.transform(current);
+                        current =
+                                typedTransformer.transform(current);
                     }
+
                 } catch (Exception e) {
-                    logger.error("Failed to transform event: {}", current, e);
+
+                    logger.error(
+                            "Failed to transform event: {}",
+                            current,
+                            e
+                    );
+
                     continue;
                 }
 
                 for (Sink<?> sink : pipeline.getSinks()) {
 
-                    try{
+                    try {
+
                         @SuppressWarnings("unchecked")
-                        Sink<Object> typedSink = (Sink<Object>) sink;
+                        Sink<Object> typedSink =
+                                (Sink<Object>) sink;
 
                         writeWithRetry(
                                 typedSink,
                                 current
                         );
-                    }catch (Exception e){
-                        logger.error("Failed to write event {} to sink {}",
+
+                    } catch (Exception e) {
+
+                        logger.error(
+                                "Failed to write event {} to sink {}",
                                 current,
                                 sink.getClass().getSimpleName(),
                                 e
@@ -96,14 +144,18 @@ public class PipelineExecutor<T> {
                     }
                 }
             }
-        }finally {
-            pipeline.getSource().stop();
 
-            for (Sink<?> sink: pipeline.getSinks()){
+        } finally {
+
+            running = false;
+
+            for (Sink<?> sink : pipeline.getSinks()) {
                 sink.stop();
             }
 
-            running = false;
+            deadLetterQueue.stop();
+
+            pipeline.getSource().stop();
         }
     }
 
@@ -126,12 +178,42 @@ public class PipelineExecutor<T> {
             } catch (Exception e) {
 
                 if (attempt == retryPolicy.maxAttempts()) {
+
                     logger.error(
                             "Sink {} failed after {} attempts",
                             sink.getClass().getSimpleName(),
                             retryPolicy.maxAttempts(),
                             e
                     );
+
+                    DeadLetterRecord record =
+                            new DeadLetterRecord(
+                                    event,
+                                    sink.getClass().getSimpleName(),
+                                    e.getClass().getName(),
+                                    e.getMessage(),
+                                    Instant.now(),
+                                    attempt - 1
+                            );
+
+                    try {
+
+                        deadLetterQueue.publish(record);
+
+                        logger.info(
+                                "Event sent to dead-letter queue after sink {} failed",
+                                sink.getClass().getSimpleName()
+                        );
+
+                    } catch (Exception dlqException) {
+
+                        logger.error(
+                                "Failed to publish event to dead-letter queue after sink {} exhausted retries",
+                                sink.getClass().getSimpleName(),
+                                dlqException
+                        );
+                    }
+
                     return;
                 }
 

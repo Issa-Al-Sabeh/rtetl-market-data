@@ -70,5 +70,19 @@ public final class PipelineConfigValidator {
                 );
             }
         }
+
+        if (pipeline.getDeadLetterQueue() == null) {
+            throw new IllegalArgumentException(
+                    "Pipeline must contain a Dead Letter Queue"
+            );
+        }
+
+        String dlqType = pipeline.getDeadLetterQueue().getType();
+
+        if (dlqType == null || dlqType.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Pipeline dead letter queue type is required"
+            );
+        }
     }
 }

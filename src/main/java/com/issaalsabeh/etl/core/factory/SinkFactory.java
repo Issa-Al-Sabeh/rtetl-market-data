@@ -5,6 +5,7 @@ import com.issaalsabeh.etl.connector.console.ConsoleSink;
 import com.issaalsabeh.etl.connector.console.EnrichedConsoleSink;
 import com.issaalsabeh.etl.connector.kafka.KafkaSink;
 import com.issaalsabeh.etl.connector.postgres.PostgresSink;
+import com.issaalsabeh.etl.connector.redis.RedisSink;
 import com.issaalsabeh.etl.core.Sink;
 
 public final class SinkFactory {
@@ -50,6 +51,21 @@ public final class SinkFactory {
                     url,
                     username,
                     password
+            );
+        }
+
+        if (type.equalsIgnoreCase("redis")) {
+            String host =
+                    config.getProperty("host");
+
+            int port =
+                    Integer.parseInt(
+                            config.getProperty("port")
+                    );
+
+            return new RedisSink(
+                    host,
+                    port
             );
         }
 

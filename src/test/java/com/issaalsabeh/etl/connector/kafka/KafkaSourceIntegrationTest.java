@@ -1,6 +1,9 @@
 package com.issaalsabeh.etl.connector.kafka;
 
 import com.issaalsabeh.etl.model.MarketEvent;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.AdminClientConfig;
+import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.AfterEach;
@@ -9,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.Properties;
 import java.util.UUID;
 
@@ -18,20 +22,53 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class KafkaSourceIntegrationTest {
 
+    private static final String BOOTSTRAP_SERVERS =
+            "localhost:9092";
     private KafkaSource kafkaSource;
     private KafkaProducer<String, String> producer;
     private ObjectMapper objectMapper;
 
-    @BeforeEach
-    void setUp() {
+    private AdminClient adminClient;
+    private String testTopic;
 
-        kafkaSource = new KafkaSource();
+    @BeforeEach
+    void setUp() throws Exception{
+
+        testTopic =
+                "market-data-test-" + UUID.randomUUID();
+
+        Properties adminProperties = new Properties();
+
+        adminProperties.put(
+                AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG,
+                BOOTSTRAP_SERVERS
+        );
+
+        adminClient =
+                AdminClient.create(adminProperties);
+
+        adminClient.createTopics(
+                List.of(
+                        new NewTopic(
+                                testTopic,
+                                1,
+                                (short) 1
+                        )
+                )
+        ).all().get();
+
+        kafkaSource = new KafkaSource(
+                BOOTSTRAP_SERVERS,
+                testTopic,
+                "kafka-source-test-" + UUID.randomUUID(),
+                "earliest"
+        );
 
         Properties properties = new Properties();
 
         properties.put(
                 "bootstrap.servers",
-                "localhost:9092"
+                BOOTSTRAP_SERVERS
         );
 
         properties.put(
@@ -53,9 +90,16 @@ class KafkaSourceIntegrationTest {
     }
 
     @AfterEach
-    void tearDown() {
+    void tearDown() throws Exception {
+
         kafkaSource.stop();
         producer.close();
+
+        adminClient.deleteTopics(
+                List.of(testTopic)
+        ).all().get();
+
+        adminClient.close();
     }
 
     @Test
@@ -74,7 +118,7 @@ class KafkaSourceIntegrationTest {
 
         ProducerRecord<String, String> record =
                 new ProducerRecord<>(
-                        "market-data",
+                        testTopic,
                         expectedEvent.symbol(),
                         json
                 );
@@ -111,7 +155,7 @@ class KafkaSourceIntegrationTest {
 
         ProducerRecord<String, String> malformedRecord =
                 new ProducerRecord<>(
-                        "market-data",
+                        testTopic,
                         "AAPL",
                         "this-is-not-valid-json"
                 );
@@ -131,7 +175,7 @@ class KafkaSourceIntegrationTest {
 
         ProducerRecord<String, String> validRecord =
                 new ProducerRecord<>(
-                        "market-data",
+                        testTopic,
                         validEvent.symbol(),
                         validJson
                 );

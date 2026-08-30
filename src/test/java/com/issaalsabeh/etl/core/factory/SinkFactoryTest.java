@@ -5,6 +5,7 @@ import com.issaalsabeh.etl.connector.console.ConsoleSink;
 import com.issaalsabeh.etl.connector.console.EnrichedConsoleSink;
 import com.issaalsabeh.etl.connector.kafka.KafkaSink;
 import com.issaalsabeh.etl.connector.postgres.PostgresSink;
+import com.issaalsabeh.etl.connector.redis.RedisSink;
 import com.issaalsabeh.etl.core.Sink;
 import com.issaalsabeh.etl.model.EnrichedMarketEvent;
 import org.junit.jupiter.api.Test;
@@ -126,6 +127,64 @@ public class SinkFactoryTest {
                         "topic", "market-data-processed"
                 )
         );
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> SinkFactory.create(config)
+        );
+    }
+
+    @Test
+    void shouldCreateRedisSink() {
+
+        SinkConfig config =
+                new SinkConfig(
+                        "redis",
+                        Map.of(
+                                "host", "localhost",
+                                "port", "6379"
+                        )
+                );
+
+        Sink<?> sink =
+                SinkFactory.create(config);
+
+        assertThat(sink)
+                .isInstanceOf(RedisSink.class);
+
+        assertThat(sink.getInputType())
+                .isEqualTo(
+                        EnrichedMarketEvent.class
+                );
+    }
+
+    @Test
+    void shouldRejectRedisSinkWithMissingHost() {
+
+        SinkConfig config =
+                new SinkConfig(
+                        "redis",
+                        Map.of(
+                                "port", "6379"
+                        )
+                );
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> SinkFactory.create(config)
+        );
+    }
+
+    @Test
+    void shouldRejectRedisSinkWithMissingPort() {
+
+        SinkConfig config =
+                new SinkConfig(
+                        "redis",
+                        Map.of(
+                                "host", "localhost"
+                        )
+                );
 
         assertThrows(
                 IllegalArgumentException.class,

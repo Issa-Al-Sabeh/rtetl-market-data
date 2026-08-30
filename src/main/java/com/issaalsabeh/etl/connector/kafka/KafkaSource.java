@@ -20,6 +20,7 @@ public class KafkaSource implements Source<MarketEvent> {
     private final String bootstrapServers;
     private final String topic;
     private final String groupId;
+    private final String autoOffsetReset;
     private KafkaConsumer<String, String> kafkaConsumer;
     private final Queue<ConsumerRecord<String, String>> queue = new LinkedList<>();
     private final ObjectMapper objectMapper;
@@ -42,10 +43,27 @@ public class KafkaSource implements Source<MarketEvent> {
         this.bootstrapServers = bootstrapServers;
         this.topic = topic;
         this.groupId = groupId;
+        this.autoOffsetReset = "latest";
 
         objectMapper = new ObjectMapper();
         objectMapper.findAndRegisterModules();
     }
+
+    public KafkaSource(
+            String bootstrapServers,
+            String topic,
+            String groupId,
+            String autoOffsetReset
+    ) {
+        this.bootstrapServers = bootstrapServers;
+        this.topic = topic;
+        this.groupId = groupId;
+        this.autoOffsetReset = autoOffsetReset;
+
+        objectMapper = new ObjectMapper();
+        objectMapper.findAndRegisterModules();
+    }
+
     @Override
     public void start() {
 
@@ -69,6 +87,11 @@ public class KafkaSource implements Source<MarketEvent> {
         properties.put(
                 "group.id",
                 groupId
+        );
+
+        properties.put(
+                "auto.offset.reset",
+                autoOffsetReset
         );
 
         kafkaConsumer = new KafkaConsumer<>(properties);
@@ -117,7 +140,11 @@ public class KafkaSource implements Source<MarketEvent> {
 
     @Override
     public void stop() {
-        kafkaConsumer.close();
+
+        if (kafkaConsumer != null) {
+            kafkaConsumer.close();
+            kafkaConsumer = null;
+        }
     }
 
     @Override

@@ -16,3 +16,8 @@ pipeline:
       properties:
         bootstrap.servers: localhost:9092
         topic: market-data-processed
+
+    - type: redis
+      properties:
+        host: 127.0.0.1
+        port: 6379

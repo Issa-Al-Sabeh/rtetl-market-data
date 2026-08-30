@@ -3,9 +3,11 @@ package com.issaalsabeh.etl.core.factory;
 import com.issaalsabeh.etl.config.PipelineConfig;
 import com.issaalsabeh.etl.config.PipelineConfigLoader;
 import com.issaalsabeh.etl.connector.console.ConsoleSink;
+import com.issaalsabeh.etl.connector.console.EnrichedConsoleSink;
 import com.issaalsabeh.etl.connector.file.FileSource;
 import com.issaalsabeh.etl.connector.kafka.KafkaSink;
 import com.issaalsabeh.etl.connector.kafka.KafkaSource;
+import com.issaalsabeh.etl.connector.redis.RedisSink;
 import com.issaalsabeh.etl.core.Pipeline;
 import com.issaalsabeh.etl.core.Sink;
 import com.issaalsabeh.etl.model.EnrichedMarketEvent;
@@ -123,12 +125,18 @@ class PipelineFactoryTest {
                     .isEqualTo(EnrichedMarketEvent.class);
 
             assertThat(pipeline.getSinks())
-                    .hasSize(1);
+                    .hasSize(2);
 
             assertThat(pipeline.getSinks().get(0))
                     .isInstanceOf(KafkaSink.class);
 
             assertThat(pipeline.getSinks().get(0).getInputType())
+                    .isEqualTo(EnrichedMarketEvent.class);
+
+            assertThat(pipeline.getSinks().get(1))
+                    .isInstanceOf(RedisSink.class);
+
+            assertThat(pipeline.getSinks().get(1).getInputType())
                     .isEqualTo(EnrichedMarketEvent.class);
 
         } finally {

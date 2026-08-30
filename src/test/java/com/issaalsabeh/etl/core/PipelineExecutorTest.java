@@ -1,5 +1,6 @@
 package com.issaalsabeh.etl.core;
 
+import com.issaalsabeh.etl.core.retry.RetryPolicy;
 import org.junit.jupiter.api.Test;
 
 import java.util.Queue;
@@ -10,6 +11,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
 
 class PipelineExecutorTest {
 
@@ -168,7 +170,7 @@ class PipelineExecutorTest {
         executor.stop();
         thread.join(1000);
 
-        assertEquals(1, failingSink.writeAttempts.get());
+        assertEquals(3, failingSink.writeAttempts.get());
         assertEquals("hello", workingSink.received.get(0));
     }
 
@@ -222,6 +224,114 @@ class PipelineExecutorTest {
         assertTrue(source.stopped);
         assertTrue(sink.stopped);
     }
+
+    @Test
+    void shouldRetrySinkUntilItSucceeds() throws InterruptedException {
+
+        SingleEventSource source =
+                new SingleEventSource();
+
+        RetryableFailingSink sink =
+                new RetryableFailingSink(2);
+
+        Pipeline<String> pipeline =
+                Pipeline.<String>builder()
+                        .source(source)
+                        .sink(sink)
+                        .build();
+
+        RetryPolicy retryPolicy =
+                new RetryPolicy(
+                        3,
+                        0,
+                        2.0,
+                        0
+                );
+
+        PipelineExecutor<String> executor =
+                new PipelineExecutor<>(
+                        pipeline,
+                        retryPolicy
+                );
+
+        Thread executorThread =
+                new Thread(executor::start);
+
+        executorThread.start();
+
+        long deadline =
+                System.currentTimeMillis() + 2_000;
+
+        while (sink.getAttempts() < 3
+                && System.currentTimeMillis() < deadline) {
+            Thread.yield();
+        }
+
+        executor.stop();
+
+        executorThread.join(2_000);
+
+        assertThat(sink.getAttempts())
+                .isEqualTo(3);
+
+        assertThat(executorThread.isAlive())
+                .isFalse();
+    }
+
+    @Test
+    void shouldStopRetryingAfterMaximumAttempts()
+            throws InterruptedException {
+
+        SingleEventSource source =
+                new SingleEventSource();
+
+        RetryableFailingSink sink =
+                new RetryableFailingSink(100);
+
+        Pipeline<String> pipeline =
+                Pipeline.<String>builder()
+                        .source(source)
+                        .sink(sink)
+                        .build();
+
+        RetryPolicy retryPolicy =
+                new RetryPolicy(
+                        3,
+                        0,
+                        2.0,
+                        0
+                );
+
+        PipelineExecutor<String> executor =
+                new PipelineExecutor<>(
+                        pipeline,
+                        retryPolicy
+                );
+
+        Thread executorThread =
+                new Thread(executor::start);
+
+        executorThread.start();
+
+        long deadline =
+                System.currentTimeMillis() + 2_000;
+
+        while (sink.getAttempts() < 3
+                && System.currentTimeMillis() < deadline) {
+            Thread.yield();
+        }
+
+        executor.stop();
+
+        executorThread.join(2_000);
+
+        assertThat(sink.getAttempts())
+                .isEqualTo(3);
+
+        assertThat(executorThread.isAlive())
+                .isFalse();
+    }
+
 
 
     // ---------- Test Transformers ----------
@@ -447,6 +557,96 @@ class PipelineExecutorTest {
 
         @Override
         public Class<?> getInputType() {
+            return String.class;
+        }
+    }
+
+    // ---------- Retryable Failing Sink ----------
+
+    private static class RetryableFailingSink
+            implements Sink<String> {
+
+        private int remainingFailures;
+        private volatile int attempts;
+
+        private RetryableFailingSink(
+                int failuresBeforeSuccess
+        ) {
+            this.remainingFailures =
+                    failuresBeforeSuccess;
+        }
+
+        @Override
+        public void start() {
+            // No setup required for this test sink.
+        }
+
+        @Override
+        public void write(String data) {
+
+            attempts++;
+
+            if (remainingFailures > 0) {
+
+                remainingFailures--;
+
+                throw new RuntimeException(
+                        "Simulated sink failure"
+                );
+            }
+        }
+
+        @Override
+        public void stop() {
+            // No cleanup required for this test sink.
+        }
+
+        @Override
+        public Class<?> getInputType() {
+            return String.class;
+        }
+
+        public int getAttempts() {
+            return attempts;
+        }
+    }
+
+    // ---------- Single Event Source ----------
+
+    private static class SingleEventSource implements Source<String> {
+
+        private boolean running;
+        private boolean emitted;
+
+        @Override
+        public void start() {
+            running = true;
+        }
+
+        @Override
+        public String poll() {
+
+            if (!running) {
+                throw new IllegalStateException(
+                        "Source is not running"
+                );
+            }
+
+            if (emitted) {
+                return null;
+            }
+
+            emitted = true;
+            return "test-event";
+        }
+
+        @Override
+        public void stop() {
+            running = false;
+        }
+
+        @Override
+        public Class<?> getOutputType() {
             return String.class;
         }
     }

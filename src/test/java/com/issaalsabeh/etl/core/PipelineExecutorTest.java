@@ -483,6 +483,137 @@ class PipelineExecutorTest {
         );
     }
 
+    @Test
+    void shouldCommitSourceAfterSuccessfulProcessing()
+            throws InterruptedException {
+
+        CommittableTestSource source =
+                new CommittableTestSource("hello");
+
+        RecordingSink sink =
+                new RecordingSink(1);
+
+        Pipeline<String> pipeline =
+                Pipeline.<String>builder()
+                        .source(source)
+                        .sink(sink)
+                        .build();
+
+        PipelineExecutor<String> executor =
+                new PipelineExecutor<>(pipeline);
+
+        Thread thread =
+                new Thread(executor::start);
+
+        thread.start();
+
+        assertTrue(sink.awaitEvent());
+
+        long deadline =
+                System.currentTimeMillis() + 2_000;
+
+        while (source.getCommitCount() < 1
+                && System.currentTimeMillis() < deadline) {
+            Thread.yield();
+        }
+
+        executor.stop();
+        thread.join(2_000);
+
+        assertThat(source.getCommitCount())
+                .isEqualTo(1);
+    }
+
+    @Test
+    void shouldNotCommitWhenEventRemainsUnresolved()
+            throws InterruptedException {
+
+        CommittableTestSource source =
+                new CommittableTestSource("hello");
+
+        RetryableFailingSink sink =
+                new RetryableFailingSink(100);
+
+        FailingDeadLetterQueue deadLetterQueue =
+                new FailingDeadLetterQueue();
+
+        Pipeline<String> pipeline =
+                Pipeline.<String>builder()
+                        .source(source)
+                        .sink(sink)
+                        .build();
+
+        RetryPolicy retryPolicy =
+                new RetryPolicy(
+                        3,
+                        0,
+                        2.0,
+                        0
+                );
+
+        PipelineExecutor<String> executor =
+                new PipelineExecutor<>(
+                        pipeline,
+                        retryPolicy,
+                        deadLetterQueue
+                );
+
+        Thread thread =
+                new Thread(executor::start);
+
+        thread.start();
+        thread.join(2_000);
+
+        assertThat(source.getCommitCount())
+                .isZero();
+
+        assertThat(thread.isAlive())
+                .isFalse();
+    }
+
+    @Test
+    void shouldCommitRejectedTransformation()
+            throws InterruptedException {
+
+        CommittableTestSource source =
+                new CommittableTestSource("bad");
+
+        RecordingSink sink =
+                new RecordingSink(0);
+
+        Pipeline<String> pipeline =
+                Pipeline.<String>builder()
+                        .source(source)
+                        .transform(new FailingOnBadTransformer())
+                        .sink(sink)
+                        .build();
+
+        PipelineExecutor<String> executor =
+                new PipelineExecutor<>(pipeline);
+
+        Thread thread =
+                new Thread(executor::start);
+
+        thread.start();
+
+        long deadline =
+                System.currentTimeMillis() + 2_000;
+
+        while (source.getCommitCount() < 1
+                && System.currentTimeMillis() < deadline) {
+            Thread.yield();
+        }
+
+        executor.stop();
+        thread.join(2_000);
+
+        assertThat(source.getCommitCount())
+                .isEqualTo(1);
+
+        assertThat(sink.received)
+                .isEmpty();
+    }
+
     // ---------- Test Transformers ----------
 
     private static class TrimTransformer
@@ -836,6 +967,82 @@ class PipelineExecutorTest {
 
         CopyOnWriteArrayList<DeadLetterRecord> getRecords() {
             return records;
+        }
+    }
+
+    // ---------- Committable Source ----------
+
+    private static class CommittableTestSource
+            implements CommittableSource<String> {
+
+        private final Queue<String> events =
+                new ConcurrentLinkedQueue<>();
+
+        private final AtomicInteger commitCount =
+                new AtomicInteger();
+
+        private boolean running;
+
+        CommittableTestSource(String... events) {
+            for (String event : events) {
+                this.events.add(event);
+            }
+        }
+
+        @Override
+        public void start() {
+            running = true;
+        }
+
+        @Override
+        public String poll() {
+            if (!running) {
+                throw new IllegalStateException(
+                        "Source is not running"
+                );
+            }
+
+            return events.poll();
+        }
+
+        @Override
+        public void commit() {
+            commitCount.incrementAndGet();
+        }
+
+        @Override
+        public void stop() {
+            running = false;
+        }
+
+        @Override
+        public Class<?> getOutputType() {
+            return String.class;
+        }
+
+        int getCommitCount() {
+            return commitCount.get();
+        }
+    }
+
+    // ---------- Failing Dead Letter Queue ----------
+
+    private static class FailingDeadLetterQueue
+            implements DeadLetterQueue {
+
+        @Override
+        public void start() {
+        }
+
+        @Override
+        public void publish(DeadLetterRecord record) {
+            throw new RuntimeException(
+                    "Simulated DLQ failure"
+            );
+        }
+
+        @Override
+        public void stop() {
         }
     }
 }

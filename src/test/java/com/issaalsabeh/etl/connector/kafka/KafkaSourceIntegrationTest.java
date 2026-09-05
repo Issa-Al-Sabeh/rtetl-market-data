@@ -262,6 +262,169 @@ class KafkaSourceIntegrationTest {
         }
     }
 
+    @Test
+    void shouldRedeliverEventWhenOffsetWasNotCommitted() throws Exception {
+
+        String topic =
+                "market-data-offset-test-" + UUID.randomUUID();
+
+        String groupId =
+                "offset-test-group-" + UUID.randomUUID();
+
+        MarketEvent event = new MarketEvent(
+                UUID.randomUUID(),
+                "AAPL",
+                new BigDecimal("150.2500"),
+                1000,
+                Instant.now()
+        );
+
+        String json = objectMapper.writeValueAsString(event);
+
+        producer.send(
+                new ProducerRecord<>(
+                        topic,
+                        event.symbol(),
+                        json
+                )
+        ).get();
+
+        KafkaSource firstSource =
+                new KafkaSource(
+                        "localhost:9092",
+                        topic,
+                        groupId,
+                        "earliest"
+                );
+
+        firstSource.start();
+
+        MarketEvent firstDelivery =
+                waitForEventWithId(
+                        firstSource,
+                        event.eventId()
+                );
+
+        assertThat(firstDelivery)
+                .isEqualTo(event);
+
+        // IMPORTANT:
+        // do NOT call firstSource.commit()
+
+        firstSource.stop();
+
+        KafkaSource restartedSource =
+                new KafkaSource(
+                        "localhost:9092",
+                        topic,
+                        groupId,
+                        "earliest"
+                );
+
+        try {
+            restartedSource.start();
+
+            MarketEvent secondDelivery =
+                    waitForEventWithId(
+                            restartedSource,
+                            event.eventId()
+                    );
+
+            assertThat(secondDelivery)
+                    .isEqualTo(event);
+
+        } finally {
+            restartedSource.stop();
+        }
+    }
+
+    @Test
+    void shouldNotRedeliverEventAfterOffsetIsCommitted() throws Exception {
+
+        String topic =
+                "market-data-offset-test-" + UUID.randomUUID();
+
+        String groupId =
+                "offset-test-group-" + UUID.randomUUID();
+
+        MarketEvent event = new MarketEvent(
+                UUID.randomUUID(),
+                "AAPL",
+                new BigDecimal("150.2500"),
+                1000,
+                Instant.now()
+        );
+
+        String json = objectMapper.writeValueAsString(event);
+
+        producer.send(
+                new ProducerRecord<>(
+                        topic,
+                        event.symbol(),
+                        json
+                )
+        ).get();
+
+        KafkaSource firstSource =
+                new KafkaSource(
+                        "localhost:9092",
+                        topic,
+                        groupId,
+                        "earliest"
+                );
+
+        firstSource.start();
+
+        MarketEvent firstDelivery =
+                waitForEventWithId(
+                        firstSource,
+                        event.eventId()
+                );
+
+        assertThat(firstDelivery)
+                .isEqualTo(event);
+
+        firstSource.commit();
+
+        firstSource.stop();
+
+        KafkaSource restartedSource =
+                new KafkaSource(
+                        "localhost:9092",
+                        topic,
+                        groupId,
+                        "earliest"
+                );
+
+        try {
+            restartedSource.start();
+
+            boolean eventWasRedelivered = false;
+
+            long deadline =
+                    System.currentTimeMillis() + 3000;
+
+            while (System.currentTimeMillis() < deadline) {
+
+                MarketEvent received =
+                        restartedSource.poll();
+
+                if (received != null
+                        && received.eventId().equals(event.eventId())) {
+
+                    eventWasRedelivered = true;
+                    break;
+                }
+            }
+
+            assertThat(eventWasRedelivered)
+                    .isFalse();
+
+        } finally {
+            restartedSource.stop();
+        }
+    }
+
     private MarketEvent waitForEventWithId(
             KafkaSource source,
             UUID eventId

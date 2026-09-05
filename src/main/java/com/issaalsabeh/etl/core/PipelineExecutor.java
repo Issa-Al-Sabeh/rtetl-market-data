@@ -117,8 +117,14 @@ public class PipelineExecutor<T> {
                             e
                     );
 
+                    if (pipeline.getSource() instanceof CommittableSource<?> source) {
+                        source.commit();
+                    }
+
                     continue;
                 }
+
+                boolean eventHandled = true;
 
                 for (Sink<?> sink : pipeline.getSinks()) {
 
@@ -128,20 +134,40 @@ public class PipelineExecutor<T> {
                         Sink<Object> typedSink =
                                 (Sink<Object>) sink;
 
-                        writeWithRetry(
-                                typedSink,
-                                current
-                        );
+                        boolean sinkHandled =
+                                writeWithRetry(
+                                        typedSink,
+                                        current
+                                );
+
+                        if (!sinkHandled) {
+                            eventHandled = false;
+                        }
 
                     } catch (Exception e) {
 
+                        eventHandled = false;
+
                         logger.error(
-                                "Failed to write event {} to sink {}",
+                                "Failed to handle event {} for sink {}",
                                 current,
                                 sink.getClass().getSimpleName(),
                                 e
                         );
                     }
+                }
+
+                if (!eventHandled) {
+
+                    logger.error(
+                            "Event could not be fully handled. Stopping pipeline to avoid committing past an unresolved offset."
+                    );
+
+                    break;
+                }
+
+                if (pipeline.getSource() instanceof CommittableSource<?> source) {
+                    source.commit();
                 }
             }
 
@@ -163,7 +189,7 @@ public class PipelineExecutor<T> {
         running = false;
     }
 
-    private void writeWithRetry(
+    private boolean writeWithRetry(
             Sink<Object> sink,
             Object event
     ) {
@@ -173,7 +199,7 @@ public class PipelineExecutor<T> {
 
             try {
                 sink.write(event);
-                return;
+                return true;
 
             } catch (Exception e) {
 
@@ -197,13 +223,14 @@ public class PipelineExecutor<T> {
                             );
 
                     try {
-
                         deadLetterQueue.publish(record);
 
                         logger.info(
                                 "Event sent to dead-letter queue after sink {} failed",
                                 sink.getClass().getSimpleName()
                         );
+
+                        return true;
 
                     } catch (Exception dlqException) {
 
@@ -212,12 +239,13 @@ public class PipelineExecutor<T> {
                                 sink.getClass().getSimpleName(),
                                 dlqException
                         );
-                    }
 
-                    return;
+                        return false;
+                    }
                 }
 
-                long delay = retryPolicy.getDelayMillis(attempt);
+                long delay =
+                        retryPolicy.getDelayMillis(attempt);
 
                 logger.warn(
                         "Sink {} failed on attempt {}/{}. Retrying in {} ms",
@@ -230,11 +258,14 @@ public class PipelineExecutor<T> {
 
                 try {
                     Thread.sleep(delay);
+
                 } catch (InterruptedException interruptedException) {
                     Thread.currentThread().interrupt();
-                    return;
+                    return false;
                 }
             }
         }
+
+        return false;
     }
 }

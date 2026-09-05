@@ -2,21 +2,17 @@ package com.issaalsabeh.etl.connector.kafka;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.issaalsabeh.etl.core.Source;
+import com.issaalsabeh.etl.core.CommittableSource;
 import com.issaalsabeh.etl.model.MarketEvent;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.ConsumerRecords;
-import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.consumer.*;
+import org.apache.kafka.common.TopicPartition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
-import java.util.Collections;
-import java.util.LinkedList;
-import java.util.Properties;
-import java.util.Queue;
+import java.util.*;
 
-public class KafkaSource implements Source<MarketEvent> {
+public class KafkaSource implements CommittableSource<MarketEvent> {
     private final String bootstrapServers;
     private final String topic;
     private final String groupId;
@@ -26,6 +22,8 @@ public class KafkaSource implements Source<MarketEvent> {
     private final ObjectMapper objectMapper;
     private static final Logger logger =
             LoggerFactory.getLogger(KafkaSource.class);
+
+    private ConsumerRecord<String, String> currentRecord;
 
     public KafkaSource(){
         this(
@@ -70,28 +68,33 @@ public class KafkaSource implements Source<MarketEvent> {
         Properties properties = new Properties();
 
         properties.put(
-                "bootstrap.servers",
+                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,
                 bootstrapServers
         );
 
         properties.put(
-                "key.deserializer",
+                ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
                 "org.apache.kafka.common.serialization.StringDeserializer"
         );
 
         properties.put(
-                "value.deserializer",
+                ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
                 "org.apache.kafka.common.serialization.StringDeserializer"
         );
 
         properties.put(
-                "group.id",
+                ConsumerConfig.GROUP_ID_CONFIG,
                 groupId
         );
 
         properties.put(
-                "auto.offset.reset",
+                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
                 autoOffsetReset
+        );
+
+        properties.put(
+                ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG,
+                false
         );
 
         kafkaConsumer = new KafkaConsumer<>(properties);
@@ -124,10 +127,15 @@ public class KafkaSource implements Source<MarketEvent> {
         }
 
         try {
-            return objectMapper.readValue(
+
+            MarketEvent event = objectMapper.readValue(
                     record.value(),
                     MarketEvent.class
             );
+
+            currentRecord = record;
+
+            return event;
         } catch (JsonProcessingException e) {
             logger.warn(
                     "Skipping malformed Kafka message: {}",
@@ -150,5 +158,38 @@ public class KafkaSource implements Source<MarketEvent> {
     @Override
     public Class<?> getOutputType() {
         return MarketEvent.class;
+    }
+
+    @Override
+    public void commit() {
+
+        if (kafkaConsumer == null) {
+            throw new IllegalStateException(
+                    "Kafka source has not been started"
+            );
+        }
+
+        if (currentRecord == null) {
+            throw new IllegalStateException(
+                    "There is no currently processed record to commit"
+            );
+        }
+
+        TopicPartition topicPartition =
+                new TopicPartition(
+                        currentRecord.topic(),
+                        currentRecord.partition()
+                );
+
+        OffsetAndMetadata offset =
+                new OffsetAndMetadata(
+                        currentRecord.offset() + 1
+                );
+
+        kafkaConsumer.commitSync(
+                Map.of(topicPartition, offset)
+        );
+
+        currentRecord = null;
     }
 }

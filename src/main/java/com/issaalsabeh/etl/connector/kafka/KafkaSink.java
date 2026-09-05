@@ -78,13 +78,12 @@ public class KafkaSink implements Sink<EnrichedMarketEvent> {
 
         if (kafkaProducer == null) {
             throw new IllegalStateException(
-                    "Sink is not running"
+                    "Kafka sink has not been started"
             );
         }
 
         try {
-            String json =
-                    objectMapper.writeValueAsString(data);
+            String json = objectMapper.writeValueAsString(data);
 
             ProducerRecord<String, String> record =
                     new ProducerRecord<>(
@@ -96,7 +95,7 @@ public class KafkaSink implements Sink<EnrichedMarketEvent> {
             kafkaProducer.send(record, (metadata, exception) -> {
                 if (exception != null) {
                     logger.error(
-                            "Failed to publish event {} to Kafka topic {}",
+                            "Failed to send event {} to topic {}",
                             data.eventId(),
                             topic,
                             exception
@@ -106,8 +105,7 @@ public class KafkaSink implements Sink<EnrichedMarketEvent> {
 
         } catch (JsonProcessingException e) {
             throw new IllegalArgumentException(
-                    "Failed to serialize enriched market event: "
-                            + data.eventId(),
+                    "Failed to serialize enriched market event",
                     e
             );
         }

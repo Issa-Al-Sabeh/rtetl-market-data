@@ -3,10 +3,15 @@ package com.issaalsabeh.etl.application;
 import com.issaalsabeh.etl.connector.kafka.MarketDataProducer;
 import com.issaalsabeh.etl.connector.mock.MockMarketSource;
 import com.issaalsabeh.etl.model.MarketEvent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MarketDataProducerApplication {
+
+    private static final Logger logger =
+            LoggerFactory.getLogger(MarketDataProducerApplication.class);
 
     public static void main(String[] args) {
 
@@ -20,20 +25,26 @@ public class MarketDataProducerApplication {
         Runtime.getRuntime().addShutdownHook(
                 new Thread(() -> {
 
-                    System.out.println("Shutting down producer...");
+                    logger.info("producer_shutdown_requested");
 
                     running.set(false);
 
-                    // Wake the main thread if it is sleeping.
                     mainThread.interrupt();
 
                     try {
+
                         mainThread.join();
+
                     } catch (InterruptedException e) {
+
                         Thread.currentThread().interrupt();
+
+                        logger.warn(
+                                "producer_shutdown_wait_interrupted"
+                        );
                     }
 
-                    System.out.println("Producer stopped.");
+                    logger.info("producer_stopped");
                 })
         );
 
@@ -43,13 +54,19 @@ public class MarketDataProducerApplication {
 
             source.start();
 
+            logger.info("producer_started");
+
             while (running.get()) {
 
                 MarketEvent event = source.poll();
 
                 producer.send(event);
 
-                System.out.println("Published: " + event);
+                logger.debug(
+                        "market_event_queued eventId={} symbol={}",
+                        event.eventId(),
+                        event.symbol()
+                );
 
                 try {
 
@@ -66,9 +83,6 @@ public class MarketDataProducerApplication {
 
             source.stop();
 
-            /*
-             * Close Kafka BEFORE restoring the interrupt flag.
-             */
             producer.close();
 
             if (interrupted) {

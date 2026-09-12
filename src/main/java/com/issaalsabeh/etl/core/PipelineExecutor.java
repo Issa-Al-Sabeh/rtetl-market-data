@@ -6,6 +6,7 @@ import com.issaalsabeh.etl.core.dlq.NoOpDeadLetterQueue;
 import com.issaalsabeh.etl.core.retry.RetryPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 import java.time.Instant;
 import java.util.concurrent.CountDownLatch;
@@ -75,105 +76,195 @@ public class PipelineExecutor<T> {
 
     public void start() {
 
-        pipeline.validate();
+        MDC.put("pipeline", pipeline.getName());
 
         try {
 
-            pipeline.getSource().start();
+            pipeline.validate();
 
-            deadLetterQueue.start();
+            MDC.put(
+                    "connector",
+                    pipeline.getSource().getClass().getSimpleName()
+            );
 
-            for (Sink<?> sink : pipeline.getSinks()) {
-                sink.start();
+            try {
+                pipeline.getSource().start();
+            } finally {
+                MDC.remove("connector");
             }
 
+            MDC.put(
+                    "connector",
+                    deadLetterQueue.getClass().getSimpleName()
+            );
+
+            try {
+                deadLetterQueue.start();
+            } finally {
+                MDC.remove("connector");
+            }
+
+            for (Sink<?> sink : pipeline.getSinks()) {
+
+                MDC.put(
+                        "connector",
+                        sink.getClass().getSimpleName()
+                );
+
+                try {
+                    sink.start();
+                } finally {
+                    MDC.remove("connector");
+                }
+            }
 
             while (!shutdownRequested) {
 
-                T event = pipeline.getSource().poll();
+                T event;
+
+                MDC.put(
+                        "connector",
+                        pipeline.getSource().getClass().getSimpleName()
+                );
+
+                try {
+                    event = pipeline.getSource().poll();
+                } finally {
+                    MDC.remove("connector");
+                }
 
                 if (event == null) {
                     continue;
                 }
 
-                Object current = event;
-
                 if (shutdownRequested) {
                     break;
                 }
 
-                try {
+                String eventId = getEventId(event);
 
-                    for (Transformer<?, ?> transformer
-                            : pipeline.getTransformers()) {
-
-                        @SuppressWarnings("unchecked")
-                        Transformer<Object, Object> typedTransformer =
-                                (Transformer<Object, Object>) transformer;
-
-                        current =
-                                typedTransformer.transform(current);
-                    }
-
-                } catch (Exception e) {
-
-                    logger.error(
-                            "Failed to transform event: {}",
-                            current,
-                            e
-                    );
-
-                    if (pipeline.getSource() instanceof CommittableSource<?> source) {
-                        source.commit();
-                    }
-
-                    continue;
+                if (eventId != null) {
+                    MDC.put("eventId", eventId);
+                } else {
+                    MDC.remove("eventId");
                 }
 
-                boolean eventHandled = true;
+                try {
 
-                for (Sink<?> sink : pipeline.getSinks()) {
+                    Object current = event;
 
                     try {
 
-                        @SuppressWarnings("unchecked")
-                        Sink<Object> typedSink =
-                                (Sink<Object>) sink;
+                        for (Transformer<?, ?> transformer
+                                : pipeline.getTransformers()) {
 
-                        boolean sinkHandled =
-                                writeWithRetry(
-                                        typedSink,
-                                        current
-                                );
+                            @SuppressWarnings("unchecked")
+                            Transformer<Object, Object> typedTransformer =
+                                    (Transformer<Object, Object>) transformer;
 
-                        if (!sinkHandled) {
-                            eventHandled = false;
+                            current =
+                                    typedTransformer.transform(current);
                         }
 
                     } catch (Exception e) {
 
-                        eventHandled = false;
+                        logger.warn(
+                                "event_transformation_failed errorType={} errorMessage={}",
+                                e.getClass().getSimpleName(),
+                                e.getMessage()
+                        );
+
+                        if (pipeline.getSource()
+                                instanceof CommittableSource<?> source) {
+
+                            MDC.put(
+                                    "connector",
+                                    source.getClass().getSimpleName()
+                            );
+
+                            try {
+                                source.commit();
+                            } finally {
+                                MDC.remove("connector");
+                            }
+                        }
+
+                        continue;
+                    }
+
+                    boolean eventHandled = true;
+
+                    for (Sink<?> sink : pipeline.getSinks()) {
+
+                        String connectorName =
+                                sink.getClass().getSimpleName();
+
+                        MDC.put(
+                                "connector",
+                                connectorName
+                        );
+
+                        try {
+
+                            @SuppressWarnings("unchecked")
+                            Sink<Object> typedSink =
+                                    (Sink<Object>) sink;
+
+                            boolean sinkHandled =
+                                    writeWithRetry(
+                                            typedSink,
+                                            current
+                                    );
+
+                            if (!sinkHandled) {
+                                eventHandled = false;
+                            }
+
+                        } catch (Exception e) {
+
+                            eventHandled = false;
+
+                            logger.error(
+                                    "sink_handling_failed errorType={} errorMessage={}",
+                                    e.getClass().getName(),
+                                    e.getMessage(),
+                                    e
+                            );
+
+                        } finally {
+
+                            MDC.remove("connector");
+                        }
+                    }
+
+                    if (!eventHandled) {
 
                         logger.error(
-                                "Failed to handle event {} for sink {}",
-                                current,
-                                sink.getClass().getSimpleName(),
-                                e
+                                "event_unresolved stoppingPipeline=true reason=no_sink_or_dlq_acceptance"
                         );
+
+                        break;
                     }
-                }
 
-                if (!eventHandled) {
+                    if (pipeline.getSource()
+                            instanceof CommittableSource<?> source) {
 
-                    logger.error(
-                            "Event could not be fully handled. Stopping pipeline to avoid committing past an unresolved offset."
-                    );
+                        MDC.put(
+                                "connector",
+                                source.getClass().getSimpleName()
+                        );
 
-                    break;
-                }
+                        try {
+                            source.commit();
+                        } finally {
+                            MDC.remove("connector");
+                        }
+                    }
 
-                if (pipeline.getSource() instanceof CommittableSource<?> source) {
-                    source.commit();
+                } finally {
+
+                    MDC.remove("eventId");
+                    MDC.remove("connector");
                 }
             }
 
@@ -181,9 +272,18 @@ public class PipelineExecutor<T> {
 
             shutdownRequested = false;
 
-            cleanupResources();
+            try {
 
-            terminated.countDown();
+                cleanupResources();
+
+            } finally {
+
+                terminated.countDown();
+
+                MDC.remove("connector");
+                MDC.remove("eventId");
+                MDC.remove("pipeline");
+            }
         }
     }
 
@@ -195,11 +295,13 @@ public class PipelineExecutor<T> {
             Sink<Object> sink,
             Object event
     ) {
+
         for (int attempt = 1;
              attempt <= retryPolicy.maxAttempts();
              attempt++) {
 
             try {
+
                 sink.write(event);
                 return true;
 
@@ -208,9 +310,10 @@ public class PipelineExecutor<T> {
                 if (attempt == retryPolicy.maxAttempts()) {
 
                     logger.error(
-                            "Sink {} failed after {} attempts",
-                            sink.getClass().getSimpleName(),
-                            retryPolicy.maxAttempts(),
+                            "sink_write_failed attempts={} errorType={} errorMessage={}",
+                            attempt,
+                            e.getClass().getName(),
+                            e.getMessage(),
                             e
                     );
 
@@ -224,12 +327,24 @@ public class PipelineExecutor<T> {
                                     attempt - 1
                             );
 
+                    String previousConnector =
+                            MDC.get("connector");
+
+                    MDC.put(
+                            "connector",
+                            deadLetterQueue
+                                    .getClass()
+                                    .getSimpleName()
+                    );
+
                     try {
+
                         deadLetterQueue.publish(record);
 
-                        logger.info(
-                                "Event sent to dead-letter queue after sink {} failed",
-                                sink.getClass().getSimpleName()
+                        logger.warn(
+                                "event_dead_lettered failedSink={} retryCount={}",
+                                sink.getClass().getSimpleName(),
+                                attempt - 1
                         );
 
                         return true;
@@ -237,12 +352,25 @@ public class PipelineExecutor<T> {
                     } catch (Exception dlqException) {
 
                         logger.error(
-                                "Failed to publish event to dead-letter queue after sink {} exhausted retries",
+                                "dead_letter_publish_failed failedSink={} errorType={} errorMessage={}",
                                 sink.getClass().getSimpleName(),
+                                dlqException.getClass().getName(),
+                                dlqException.getMessage(),
                                 dlqException
                         );
 
                         return false;
+
+                    } finally {
+
+                        if (previousConnector != null) {
+                            MDC.put(
+                                    "connector",
+                                    previousConnector
+                            );
+                        } else {
+                            MDC.remove("connector");
+                        }
                     }
                 }
 
@@ -250,19 +378,28 @@ public class PipelineExecutor<T> {
                         retryPolicy.getDelayMillis(attempt);
 
                 logger.warn(
-                        "Sink {} failed on attempt {}/{}. Retrying in {} ms",
-                        sink.getClass().getSimpleName(),
+                        "sink_retry attempt={} maxAttempts={} delayMs={} errorType={} errorMessage={}",
                         attempt,
                         retryPolicy.maxAttempts(),
                         delay,
-                        e
+                        e.getClass().getSimpleName(),
+                        e.getMessage()
                 );
 
                 try {
+
                     Thread.sleep(delay);
 
                 } catch (InterruptedException interruptedException) {
+
                     Thread.currentThread().interrupt();
+
+                    logger.warn(
+                            "sink_retry_interrupted attempt={} maxAttempts={}",
+                            attempt,
+                            retryPolicy.maxAttempts()
+                    );
+
                     return false;
                 }
             }
@@ -278,33 +415,86 @@ public class PipelineExecutor<T> {
     private void cleanupResources() {
 
         for (Sink<?> sink : pipeline.getSinks()) {
+
+            MDC.put(
+                    "connector",
+                    sink.getClass().getSimpleName()
+            );
+
             try {
+
                 sink.stop();
+
             } catch (Exception e) {
+
                 logger.error(
-                        "Failed to stop sink {}",
-                        sink.getClass().getSimpleName(),
+                        "connector_stop_failed errorType={} errorMessage={}",
+                        e.getClass().getName(),
+                        e.getMessage(),
                         e
                 );
+
+            } finally {
+
+                MDC.remove("connector");
             }
         }
 
-        try {
-            deadLetterQueue.stop();
-        } catch (Exception e) {
-            logger.error(
-                    "Failed to stop Dead Letter Queue",
-                    e
-            );
-        }
+        MDC.put(
+                "connector",
+                deadLetterQueue.getClass().getSimpleName()
+        );
 
         try {
-            pipeline.getSource().stop();
+
+            deadLetterQueue.stop();
+
         } catch (Exception e) {
+
             logger.error(
-                    "Failed to stop Source",
+                    "connector_stop_failed errorType={} errorMessage={}",
+                    e.getClass().getName(),
+                    e.getMessage(),
                     e
             );
+
+        } finally {
+
+            MDC.remove("connector");
         }
+
+        MDC.put(
+                "connector",
+                pipeline.getSource().getClass().getSimpleName()
+        );
+
+        try {
+
+            pipeline.getSource().stop();
+
+        } catch (Exception e) {
+
+            logger.error(
+                    "connector_stop_failed errorType={} errorMessage={}",
+                    e.getClass().getName(),
+                    e.getMessage(),
+                    e
+            );
+
+        } finally {
+
+            MDC.remove("connector");
+        }
+    }
+
+    private String getEventId(Object event) {
+
+        if (event instanceof IdentifiableEvent identifiable
+                && identifiable.eventId() != null) {
+
+            return identifiable.eventId().toString();
+        }
+
+        return null;
     }
 }

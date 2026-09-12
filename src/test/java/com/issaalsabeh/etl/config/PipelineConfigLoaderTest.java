@@ -51,6 +51,10 @@ class PipelineConfigLoaderTest {
                 .get(0)
                 .getProperties())
                 .isEmpty();
+
+        //Name
+        assertThat(config.getPipeline().getName())
+                .isEqualTo("test-market-data-etl");
     }
 
     @Test

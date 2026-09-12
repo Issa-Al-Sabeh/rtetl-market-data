@@ -22,6 +22,12 @@ public final class PipelineConfigValidator {
         PipelineConfig.PipelineDefinition pipeline =
                 config.getPipeline();
 
+        if (pipeline.getName() == null || pipeline.getName().isBlank()) {
+            throw new IllegalArgumentException(
+                    "Pipeline name must not be null or blank"
+            );
+        }
+
         if (pipeline.getSource() == null) {
             throw new IllegalArgumentException(
                     "Pipeline source is required"

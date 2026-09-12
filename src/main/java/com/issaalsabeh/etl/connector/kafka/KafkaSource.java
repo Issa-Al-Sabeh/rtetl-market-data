@@ -13,19 +13,26 @@ import java.time.Duration;
 import java.util.*;
 
 public class KafkaSource implements CommittableSource<MarketEvent> {
+
     private final String bootstrapServers;
     private final String topic;
     private final String groupId;
     private final String autoOffsetReset;
+
     private KafkaConsumer<String, String> kafkaConsumer;
-    private final Queue<ConsumerRecord<String, String>> queue = new LinkedList<>();
+
+    private final Queue<ConsumerRecord<String, String>> queue =
+            new LinkedList<>();
+
     private final ObjectMapper objectMapper;
+
     private static final Logger logger =
             LoggerFactory.getLogger(KafkaSource.class);
 
     private ConsumerRecord<String, String> currentRecord;
 
-    public KafkaSource(){
+    public KafkaSource() {
+
         this(
                 "localhost:9092",
                 "market-data",
@@ -37,7 +44,8 @@ public class KafkaSource implements CommittableSource<MarketEvent> {
             String bootstrapServers,
             String topic,
             String groupId
-    ){
+    ) {
+
         this.bootstrapServers = bootstrapServers;
         this.topic = topic;
         this.groupId = groupId;
@@ -53,6 +61,7 @@ public class KafkaSource implements CommittableSource<MarketEvent> {
             String groupId,
             String autoOffsetReset
     ) {
+
         this.bootstrapServers = bootstrapServers;
         this.topic = topic;
         this.groupId = groupId;
@@ -97,9 +106,12 @@ public class KafkaSource implements CommittableSource<MarketEvent> {
                 false
         );
 
-        kafkaConsumer = new KafkaConsumer<>(properties);
+        kafkaConsumer =
+                new KafkaConsumer<>(properties);
 
-        kafkaConsumer.subscribe(Collections.singleton(topic));
+        kafkaConsumer.subscribe(
+                Collections.singleton(topic)
+        );
     }
 
     @Override
@@ -111,16 +123,20 @@ public class KafkaSource implements CommittableSource<MarketEvent> {
             );
         }
 
-        if (queue.isEmpty()){
+        if (queue.isEmpty()) {
+
             ConsumerRecords<String, String> records =
-                    kafkaConsumer.poll(Duration.ofMillis(100));
+                    kafkaConsumer.poll(
+                            Duration.ofMillis(100)
+                    );
 
             for (ConsumerRecord<String, String> record : records) {
                 queue.add(record);
             }
         }
 
-        ConsumerRecord<String, String> record = queue.poll();
+        ConsumerRecord<String, String> record =
+                queue.poll();
 
         if (record == null) {
             return null;
@@ -128,18 +144,25 @@ public class KafkaSource implements CommittableSource<MarketEvent> {
 
         try {
 
-            MarketEvent event = objectMapper.readValue(
-                    record.value(),
-                    MarketEvent.class
-            );
+            MarketEvent event =
+                    objectMapper.readValue(
+                            record.value(),
+                            MarketEvent.class
+                    );
 
             currentRecord = record;
 
             return event;
+
         } catch (JsonProcessingException e) {
+
             logger.warn(
-                    "Skipping malformed Kafka message: {}",
-                    record.value()
+                    "malformed_kafka_input topic={} partition={} offset={} errorType={} errorMessage={}",
+                    record.topic(),
+                    record.partition(),
+                    record.offset(),
+                    e.getClass().getSimpleName(),
+                    e.getMessage()
             );
 
             return null;
@@ -195,7 +218,10 @@ public class KafkaSource implements CommittableSource<MarketEvent> {
                 );
 
         kafkaConsumer.commitSync(
-                Map.of(topicPartition, offset)
+                Map.of(
+                        topicPartition,
+                        offset
+                )
         );
 
         currentRecord = null;

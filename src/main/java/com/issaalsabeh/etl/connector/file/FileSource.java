@@ -17,10 +17,12 @@ public class FileSource implements Source<MarketEvent> {
     private final String filePath;
     private BufferedReader reader;
     private final ObjectMapper objectMapper;
+
     private static final Logger logger =
             LoggerFactory.getLogger(FileSource.class);
 
     public FileSource(String filePath) {
+
         if (filePath == null || filePath.isBlank()) {
             throw new IllegalArgumentException(
                     "File path cannot be null or blank"
@@ -28,17 +30,22 @@ public class FileSource implements Source<MarketEvent> {
         }
 
         this.filePath = filePath;
+
         objectMapper = new ObjectMapper();
         objectMapper.findAndRegisterModules();
     }
 
     @Override
     public void start() {
+
         try {
+
             reader = Files.newBufferedReader(
                     Path.of(filePath)
             );
+
         } catch (IOException e) {
+
             throw new IllegalStateException(
                     "Failed to open file: " + filePath,
                     e
@@ -50,7 +57,9 @@ public class FileSource implements Source<MarketEvent> {
     public MarketEvent poll() {
 
         if (reader == null) {
-            throw new IllegalStateException("Source is not running");
+            throw new IllegalStateException(
+                    "Source is not running"
+            );
         }
 
         while (true) {
@@ -58,9 +67,11 @@ public class FileSource implements Source<MarketEvent> {
             String line;
 
             try {
+
                 line = reader.readLine();
 
             } catch (IOException e) {
+
                 throw new IllegalStateException(
                         "Failed to read from file: " + filePath,
                         e
@@ -72,15 +83,18 @@ public class FileSource implements Source<MarketEvent> {
             }
 
             try {
+
                 return objectMapper.readValue(
                         line,
                         MarketEvent.class
                 );
 
             } catch (JsonProcessingException e) {
+
                 logger.warn(
-                        "Skipping malformed file line: {}",
-                        line
+                        "malformed_file_input errorType={} errorMessage={}",
+                        e.getClass().getSimpleName(),
+                        e.getMessage()
                 );
             }
         }
@@ -90,14 +104,20 @@ public class FileSource implements Source<MarketEvent> {
     public void stop() {
 
         if (reader != null) {
+
             try {
+
                 reader.close();
+
             } catch (IOException e) {
+
                 throw new IllegalStateException(
                         "Failed to close file: " + filePath,
                         e
                 );
+
             } finally {
+
                 reader = null;
             }
         }

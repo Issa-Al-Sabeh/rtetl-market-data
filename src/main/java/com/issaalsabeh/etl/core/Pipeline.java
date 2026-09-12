@@ -5,23 +5,36 @@ import java.util.List;
 
 public class Pipeline<T> {
 
+    private final String name;
     private final Source<T> source;
     private final List<Transformer<?, ?>> transformers;
     private final List<Sink<?>> sinks;
 
-    public Pipeline(Source<T> source) {
+    public Pipeline(String name,Source<T> source) {
+
+        if(name == null || name.isBlank()){
+            throw new IllegalArgumentException("Name must not be null or blank");
+        }
+
         if (source == null) {
             throw new IllegalArgumentException("Source cannot be null");
         }
 
+        this.name = name;
         this.source = source;
         this.transformers = new ArrayList<>();
         this.sinks = new ArrayList<>();
     }
 
+    public Pipeline(Source<T> source) {
+        this("unnamed-pipeline",source);
+    }
+
     public static <T> Builder<T> builder(){
         return new Builder<>();
     }
+
+    public String getName() {return name;}
 
     public Source<T> getSource() {
         return source;
@@ -64,9 +77,20 @@ public class Pipeline<T> {
     }
 
     public static class Builder<T> {
+
+        private String name = "unnamed-pipeline";
         private Source<T> source;
         private final List<Transformer<?, ?>> transformers = new ArrayList<>();
         private final List<Sink<?>> sinks = new ArrayList<>();
+
+        public Builder<T> name(String name) {
+            if(name == null || name.isBlank()){
+                throw new IllegalArgumentException("Name must not be null or blank");
+            }
+
+            this.name = name;
+            return this;
+        }
 
         public Builder<T> source(Source<T> source){
             if (source == null){
@@ -103,7 +127,7 @@ public class Pipeline<T> {
                 throw new IllegalStateException("Pipeline must have a source");
             }
 
-            Pipeline<T> pipeline = new Pipeline<>(source);
+            Pipeline<T> pipeline = new Pipeline<>(name, source);
 
             for (Transformer<?, ?> transformer : transformers) {
                 pipeline.addTransformer(transformer);

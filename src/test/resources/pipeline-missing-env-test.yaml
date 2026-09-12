@@ -1,4 +1,5 @@
 pipeline:
+  name: missing-env-test-pipeline
   source:
     type: file
     properties:

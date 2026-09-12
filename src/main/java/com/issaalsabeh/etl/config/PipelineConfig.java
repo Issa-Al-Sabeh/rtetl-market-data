@@ -17,10 +17,20 @@ public class PipelineConfig {
 
     public static class PipelineDefinition {
 
+        private String name;
+
         private ConnectorConfig source;
         private List<String> transformations;
         private List<ConnectorConfig> sinks;
         private ConnectorConfig deadLetterQueue;
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
 
         public ConnectorConfig getSource() {
             return source;

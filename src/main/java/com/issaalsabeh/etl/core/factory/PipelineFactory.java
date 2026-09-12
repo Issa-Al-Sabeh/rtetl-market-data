@@ -18,11 +18,13 @@ public final class PipelineFactory {
 
         PipelineConfigValidator.validate(config);
 
+        String name = config.getPipeline().getName();
         Source<?> source = createSource(config);
         List<Transformer<?, ?>> transformers = createTransformers(config);
         List<Sink<?>> sinks = createSinks(config);
 
         return buildPipeline(
+                name,
                 source,
                 transformers,
                 sinks
@@ -83,12 +85,14 @@ public final class PipelineFactory {
     }
 
     private static <T> Pipeline<T> buildPipeline(
+            String name,
             Source<T> source,
             List<Transformer<?, ?>> transformers,
             List<Sink<?>> sinks) {
 
         Pipeline.Builder<T> builder =
                 Pipeline.<T>builder()
+                        .name(name)
                         .source(source);
 
         for (Transformer<?, ?> transformer : transformers) {

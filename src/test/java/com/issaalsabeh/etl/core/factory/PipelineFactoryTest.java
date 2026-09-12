@@ -73,6 +73,9 @@ class PipelineFactoryTest {
 
         assertThat(pipeline.getSinks().get(0).getInputType())
                 .isEqualTo(MarketEvent.class);
+
+        assertThat(pipeline.getName())
+                .isEqualTo("test-market-data-etl");
     }
 
     @Test
@@ -89,6 +92,7 @@ class PipelineFactoryTest {
         )
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("type mismatch");
+
     }
 
     @Test
@@ -145,6 +149,9 @@ class PipelineFactoryTest {
 
             assertThat(pipeline.getSinks().get(2).getInputType())
                     .isEqualTo(EnrichedMarketEvent.class);
+
+            assertThat(pipeline.getName())
+                    .isEqualTo("realtime-market-data-etl");
 
         } finally {
             pipeline.getSource().stop();

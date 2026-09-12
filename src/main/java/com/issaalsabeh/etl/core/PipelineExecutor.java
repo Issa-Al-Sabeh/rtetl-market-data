@@ -8,6 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
+import java.util.concurrent.CountDownLatch;
 
 public class PipelineExecutor<T> {
 
@@ -16,11 +17,13 @@ public class PipelineExecutor<T> {
 
     private final Pipeline<T> pipeline;
 
-    private volatile boolean running;
+    private volatile boolean shutdownRequested;
 
     private final RetryPolicy retryPolicy;
 
     private final DeadLetterQueue deadLetterQueue;
+
+    private final CountDownLatch terminated = new CountDownLatch(1);
 
     public PipelineExecutor(Pipeline<T> pipeline) {
         this(
@@ -67,7 +70,7 @@ public class PipelineExecutor<T> {
         this.pipeline = pipeline;
         this.retryPolicy = retryPolicy;
         this.deadLetterQueue = deadLetterQueue;
-        this.running = false;
+        this.shutdownRequested = false;
     }
 
     public void start() {
@@ -84,9 +87,8 @@ public class PipelineExecutor<T> {
                 sink.start();
             }
 
-            running = true;
 
-            while (running) {
+            while (!shutdownRequested) {
 
                 T event = pipeline.getSource().poll();
 
@@ -95,6 +97,10 @@ public class PipelineExecutor<T> {
                 }
 
                 Object current = event;
+
+                if (shutdownRequested) {
+                    break;
+                }
 
                 try {
 
@@ -173,20 +179,16 @@ public class PipelineExecutor<T> {
 
         } finally {
 
-            running = false;
+            shutdownRequested = false;
 
-            for (Sink<?> sink : pipeline.getSinks()) {
-                sink.stop();
-            }
+            cleanupResources();
 
-            deadLetterQueue.stop();
-
-            pipeline.getSource().stop();
+            terminated.countDown();
         }
     }
 
     public void stop(){
-        running = false;
+        shutdownRequested = true;
     }
 
     private boolean writeWithRetry(
@@ -267,5 +269,42 @@ public class PipelineExecutor<T> {
         }
 
         return false;
+    }
+
+    public void awaitTermination() throws InterruptedException {
+        terminated.await();
+    }
+
+    private void cleanupResources() {
+
+        for (Sink<?> sink : pipeline.getSinks()) {
+            try {
+                sink.stop();
+            } catch (Exception e) {
+                logger.error(
+                        "Failed to stop sink {}",
+                        sink.getClass().getSimpleName(),
+                        e
+                );
+            }
+        }
+
+        try {
+            deadLetterQueue.stop();
+        } catch (Exception e) {
+            logger.error(
+                    "Failed to stop Dead Letter Queue",
+                    e
+            );
+        }
+
+        try {
+            pipeline.getSource().stop();
+        } catch (Exception e) {
+            logger.error(
+                    "Failed to stop Source",
+                    e
+            );
+        }
     }
 }

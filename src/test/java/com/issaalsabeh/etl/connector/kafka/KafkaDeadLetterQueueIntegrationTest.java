@@ -201,6 +201,43 @@ class KafkaDeadLetterQueueIntegrationTest {
                 );
     }
 
+    @Test
+    void shouldRejectPublishingAfterStop() {
+
+        KafkaDeadLetterQueue deadLetterQueue =
+                new KafkaDeadLetterQueue(
+                        "localhost:9092",
+                        "market-data-dlq"
+                );
+
+        deadLetterQueue.start();
+        deadLetterQueue.stop();
+
+        MarketEvent event =
+                new MarketEvent(
+                        UUID.randomUUID(),
+                        "AAPL",
+                        new BigDecimal("150.2500"),
+                        1000,
+                        Instant.now()
+                );
+
+        DeadLetterRecord record =
+                new DeadLetterRecord(
+                        event,
+                        "KafkaSink",
+                        RuntimeException.class.getName(),
+                        "Test failure",
+                        Instant.now(),
+                        2
+                );
+
+        assertThatThrownBy(
+                () -> deadLetterQueue.publish(record)
+        )
+                .isInstanceOf(IllegalStateException.class);
+    }
+
     private KafkaConsumer<String, String>
     createConsumer() {
 

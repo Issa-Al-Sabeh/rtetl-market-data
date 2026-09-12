@@ -149,9 +149,17 @@ public class KafkaSource implements CommittableSource<MarketEvent> {
     @Override
     public void stop() {
 
-        if (kafkaConsumer != null) {
-            kafkaConsumer.close();
+        try {
+
+            if (kafkaConsumer != null) {
+                kafkaConsumer.close();
+            }
+
+        } finally {
+
             kafkaConsumer = null;
+            queue.clear();
+            currentRecord = null;
         }
     }
 

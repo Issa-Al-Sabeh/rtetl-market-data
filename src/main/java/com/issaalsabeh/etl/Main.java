@@ -47,7 +47,16 @@ public class Main {
 
         Runtime.getRuntime()
                 .addShutdownHook(
-                        new Thread(executor::stop)
+                        new Thread(() -> {
+
+                            executor.stop();
+
+                            try {
+                                executor.awaitTermination();
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                            }
+                        })
                 );
 
         executor.start();

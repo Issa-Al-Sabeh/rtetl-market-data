@@ -19,6 +19,7 @@ import java.util.UUID;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.*;
 
 class KafkaSourceIntegrationTest {
@@ -423,6 +424,23 @@ class KafkaSourceIntegrationTest {
         } finally {
             restartedSource.stop();
         }
+    }
+
+    @Test
+    void shouldRejectPollingAfterStop() {
+
+        KafkaSource source =
+                new KafkaSource(
+                        "localhost:9092",
+                        "market-data",
+                        "test-group"
+                );
+
+        source.start();
+        source.stop();
+
+        assertThatThrownBy(source::poll)
+                .isInstanceOf(IllegalStateException.class);
     }
 
     private MarketEvent waitForEventWithId(

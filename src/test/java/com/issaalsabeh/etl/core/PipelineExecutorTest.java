@@ -5,6 +5,9 @@ import com.issaalsabeh.etl.core.dlq.DeadLetterRecord;
 import com.issaalsabeh.etl.core.retry.RetryPolicy;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -612,6 +615,535 @@ class PipelineExecutorTest {
 
         assertThat(sink.received)
                 .isEmpty();
+    }
+
+    @Test
+    void shouldFinishInFlightEventBeforeShutdown() throws Exception {
+
+        SingleEventSource source = new SingleEventSource();
+        BlockingSink sink = new BlockingSink();
+
+        Pipeline<String> pipeline = new Pipeline<>(source);
+        pipeline.addSink(sink);
+
+        PipelineExecutor<String> executor =
+                new PipelineExecutor<>(pipeline);
+
+        Thread executorThread = new Thread(executor::start);
+        executorThread.start();
+
+        assertThat(sink.awaitWriteStarted(2, TimeUnit.SECONDS))
+                .isTrue();
+
+        executor.stop();
+
+        assertThat(executorThread.isAlive())
+                .isTrue();
+
+        sink.allowWriteToFinish();
+
+        executorThread.join(2_000);
+
+        assertThat(executorThread.isAlive())
+                .isFalse();
+
+        assertThat(sink.getReceived())
+                .containsExactly("test-event");
+    }
+
+    @Test
+    void shouldCommitInFlightEventBeforeGracefulShutdown() throws Exception {
+
+        CommittableSingleEventSource source =
+                new CommittableSingleEventSource("hello");
+
+        BlockingSink sink = new BlockingSink();
+
+        Pipeline<String> pipeline = new Pipeline<>(source);
+        pipeline.addSink(sink);
+
+        PipelineExecutor<String> executor =
+                new PipelineExecutor<>(pipeline);
+
+        Thread executorThread = new Thread(executor::start);
+        executorThread.start();
+
+        assertThat(sink.awaitWriteStarted(2, TimeUnit.SECONDS))
+                .isTrue();
+
+        executor.stop();
+
+        sink.allowWriteToFinish();
+
+        executorThread.join(2_000);
+
+        assertThat(executorThread.isAlive())
+                .isFalse();
+
+        assertThat(source.getCommitCount())
+                .isEqualTo(1);
+    }
+
+    @Test
+    void shouldNotProcessAnotherEventAfterShutdownIsRequested() throws Exception {
+
+        TwoEventSource source =
+                new TwoEventSource("first", "second");
+
+        BlockingFirstWriteSink sink =
+                new BlockingFirstWriteSink();
+
+        Pipeline<String> pipeline = new Pipeline<>(source);
+        pipeline.addSink(sink);
+
+        PipelineExecutor<String> executor =
+                new PipelineExecutor<>(pipeline);
+
+        Thread executorThread = new Thread(executor::start);
+        executorThread.start();
+
+        assertThat(sink.awaitFirstWriteStarted(2, TimeUnit.SECONDS))
+                .isTrue();
+
+        executor.stop();
+
+        sink.allowFirstWriteToFinish();
+
+        executorThread.join(2_000);
+
+        assertThat(executorThread.isAlive())
+                .isFalse();
+
+        assertThat(sink.getReceived())
+                .containsExactly("first");
+    }
+
+    @Test
+    void shouldContinueCleanupWhenOneSinkFailsToStop() throws Exception {
+
+        RecordingStopSource source =
+                new RecordingStopSource("hello");
+
+        FailingStopSink failingSink =
+                new FailingStopSink();
+
+        RecordingStopSink workingSink =
+                new RecordingStopSink();
+
+        RecordingStopDeadLetterQueue deadLetterQueue =
+                new RecordingStopDeadLetterQueue();
+
+        Pipeline<String> pipeline = new Pipeline<>(source);
+        pipeline.addSink(failingSink);
+        pipeline.addSink(workingSink);
+
+        PipelineExecutor<String> executor =
+                new PipelineExecutor<>(
+                        pipeline,
+                        new RetryPolicy(1, 0, 1.0, 0),
+                        deadLetterQueue
+                );
+
+        Thread executorThread = new Thread(executor::start);
+        executorThread.start();
+
+        assertThat(workingSink.awaitWrite(2, TimeUnit.SECONDS))
+                .isTrue();
+
+        executor.stop();
+
+        executorThread.join(2_000);
+
+        assertThat(executorThread.isAlive())
+                .isFalse();
+
+        assertThat(failingSink.wasStopCalled())
+                .isTrue();
+
+        assertThat(workingSink.isStopped())
+                .isTrue();
+
+        assertThat(deadLetterQueue.isStopped())
+                .isTrue();
+
+        assertThat(source.isStopped())
+                .isTrue();
+    }
+
+
+
+    // ---------- Recording Stop Dead Letter Queue ----------
+
+    private static class RecordingStopDeadLetterQueue
+            implements DeadLetterQueue {
+
+        private volatile boolean stopped;
+
+        @Override
+        public void start() {
+        }
+
+        @Override
+        public void publish(DeadLetterRecord record) {
+        }
+
+        @Override
+        public void stop() {
+            stopped = true;
+        }
+
+        boolean isStopped() {
+            return stopped;
+        }
+    }
+
+    // ---------- Failing Stop Sink ----------
+
+    private static class FailingStopSink
+            implements Sink<String> {
+
+        private volatile boolean stopCalled;
+
+        @Override
+        public void start() {
+        }
+
+        @Override
+        public void write(String data) {
+        }
+
+        @Override
+        public void stop() {
+            stopCalled = true;
+            throw new RuntimeException(
+                    "Failed to stop sink"
+            );
+        }
+
+        @Override
+        public Class<?> getInputType() {
+            return String.class;
+        }
+
+        boolean wasStopCalled() {
+            return stopCalled;
+        }
+    }
+
+    // ---------- Recording Stop Sink ----------
+
+    private static class RecordingStopSink
+            implements Sink<String> {
+
+        private final CountDownLatch writeLatch =
+                new CountDownLatch(1);
+
+        private volatile boolean stopped;
+
+        @Override
+        public void start() {
+        }
+
+        @Override
+        public void write(String data) {
+            writeLatch.countDown();
+        }
+
+        @Override
+        public void stop() {
+            stopped = true;
+        }
+
+        @Override
+        public Class<?> getInputType() {
+            return String.class;
+        }
+
+        boolean awaitWrite(
+                long timeout,
+                TimeUnit unit
+        ) throws InterruptedException {
+
+            return writeLatch.await(timeout, unit);
+        }
+
+        boolean isStopped() {
+            return stopped;
+        }
+    }
+
+    // ---------- Recording Stop Source ----------
+
+    private static class RecordingStopSource
+            implements Source<String> {
+
+        private final String event;
+
+        private boolean emitted;
+        private boolean running;
+        private volatile boolean stopped;
+
+        private RecordingStopSource(String event) {
+            this.event = event;
+        }
+
+        @Override
+        public void start() {
+            running = true;
+        }
+
+        @Override
+        public String poll() {
+
+            if (!running) {
+                throw new IllegalStateException(
+                        "Source is not running"
+                );
+            }
+
+            if (emitted) {
+                return null;
+            }
+
+            emitted = true;
+            return event;
+        }
+
+        @Override
+        public void stop() {
+            stopped = true;
+            running = false;
+        }
+
+        @Override
+        public Class<?> getOutputType() {
+            return String.class;
+        }
+
+        boolean isStopped() {
+            return stopped;
+        }
+    }
+
+    // ---------- Blocking first Write Sink ----------
+
+    private static class BlockingFirstWriteSink
+            implements Sink<String> {
+
+        private final CountDownLatch firstWriteStarted =
+                new CountDownLatch(1);
+
+        private final CountDownLatch allowFirstWriteToFinish =
+                new CountDownLatch(1);
+
+        private final List<String> received =
+                new ArrayList<>();
+
+        @Override
+        public void start() {
+        }
+
+        @Override
+        public void write(String data) {
+
+            if (received.isEmpty()) {
+
+                firstWriteStarted.countDown();
+
+                try {
+                    allowFirstWriteToFinish.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException(e);
+                }
+            }
+
+            received.add(data);
+        }
+
+        @Override
+        public void stop() {
+        }
+
+        @Override
+        public Class<?> getInputType() {
+            return String.class;
+        }
+
+        boolean awaitFirstWriteStarted(
+                long timeout,
+                TimeUnit unit
+        ) throws InterruptedException {
+
+            return firstWriteStarted.await(timeout, unit);
+        }
+
+        void allowFirstWriteToFinish() {
+            allowFirstWriteToFinish.countDown();
+        }
+
+        List<String> getReceived() {
+            return received;
+        }
+    }
+
+    // ---------- Two Event Source ----------
+
+    private static class TwoEventSource implements Source<String> {
+
+        private final Queue<String> events =
+                new ArrayDeque<>();
+
+        private boolean running;
+
+        private TwoEventSource(String first, String second) {
+            events.add(first);
+            events.add(second);
+        }
+
+        @Override
+        public void start() {
+            running = true;
+        }
+
+        @Override
+        public String poll() {
+
+            if (!running) {
+                throw new IllegalStateException(
+                        "Source is not running"
+                );
+            }
+
+            return events.poll();
+        }
+
+        @Override
+        public void stop() {
+            running = false;
+        }
+
+        @Override
+        public Class<?> getOutputType() {
+            return String.class;
+        }
+    }
+
+    // ---------- Committable Single Event Source ----------
+
+    private static class CommittableSingleEventSource
+            implements CommittableSource<String> {
+
+        private final String event;
+
+        private final AtomicInteger commitCount =
+                new AtomicInteger();
+
+        private boolean running;
+        private boolean emitted;
+
+        private CommittableSingleEventSource(String event) {
+            this.event = event;
+        }
+
+        @Override
+        public void start() {
+            running = true;
+        }
+
+        @Override
+        public String poll() {
+
+            if (!running) {
+                throw new IllegalStateException(
+                        "Source is not running"
+                );
+            }
+
+            if (emitted) {
+                return null;
+            }
+
+            emitted = true;
+            return event;
+        }
+
+        @Override
+        public void commit() {
+            commitCount.incrementAndGet();
+        }
+
+        @Override
+        public void stop() {
+            running = false;
+        }
+
+        @Override
+        public Class<?> getOutputType() {
+            return String.class;
+        }
+
+        int getCommitCount() {
+            return commitCount.get();
+        }
+    }
+
+    // ---------- Blocking Sink ----------
+
+    private static class BlockingSink implements Sink<String> {
+
+        private final CountDownLatch writeStarted =
+                new CountDownLatch(1);
+
+        private final CountDownLatch allowWriteToFinish =
+                new CountDownLatch(1);
+
+        private final List<String> received =
+                new ArrayList<>();
+
+        @Override
+        public void start() {
+        }
+
+        @Override
+        public void write(String data) {
+
+            writeStarted.countDown();
+
+            try {
+                allowWriteToFinish.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            }
+
+            received.add(data);
+        }
+
+        @Override
+        public void stop() {
+        }
+
+        @Override
+        public Class<?> getInputType() {
+            return String.class;
+        }
+
+        boolean awaitWriteStarted(
+                long timeout,
+                TimeUnit unit
+        ) throws InterruptedException {
+
+            return writeStarted.await(timeout, unit);
+        }
+
+        void allowWriteToFinish() {
+            allowWriteToFinish.countDown();
+        }
+
+        List<String> getReceived() {
+            return received;
+        }
     }
 
     // ---------- Test Transformers ----------

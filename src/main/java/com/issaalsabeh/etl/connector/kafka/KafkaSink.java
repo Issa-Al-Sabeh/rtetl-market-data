@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Properties;
+import java.util.concurrent.ExecutionException;
 
 public class KafkaSink implements Sink<EnrichedMarketEvent> {
 
@@ -83,7 +84,9 @@ public class KafkaSink implements Sink<EnrichedMarketEvent> {
         }
 
         try {
-            String json = objectMapper.writeValueAsString(data);
+
+            String json =
+                    objectMapper.writeValueAsString(data);
 
             ProducerRecord<String, String> record =
                     new ProducerRecord<>(
@@ -92,20 +95,28 @@ public class KafkaSink implements Sink<EnrichedMarketEvent> {
                             json
                     );
 
-            kafkaProducer.send(record, (metadata, exception) -> {
-                if (exception != null) {
-                    logger.error(
-                            "Failed to send event {} to topic {}",
-                            data.eventId(),
-                            topic,
-                            exception
-                    );
-                }
-            });
+            kafkaProducer.send(record).get();
 
         } catch (JsonProcessingException e) {
+
             throw new IllegalArgumentException(
                     "Failed to serialize enriched market event",
+                    e
+            );
+
+        } catch (InterruptedException e) {
+
+            Thread.currentThread().interrupt();
+
+            throw new IllegalStateException(
+                    "Kafka publish interrupted",
+                    e
+            );
+
+        } catch (ExecutionException e) {
+
+            throw new IllegalStateException(
+                    "Failed to publish Kafka event",
                     e
             );
         }

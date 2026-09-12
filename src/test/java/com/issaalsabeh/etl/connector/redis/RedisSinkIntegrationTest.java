@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 public class RedisSinkIntegrationTest {
 
@@ -131,5 +132,36 @@ public class RedisSinkIntegrationTest {
         } finally {
             sink.stop();
         }
+    }
+
+    @Test
+    void shouldRejectWritingAfterStop() {
+
+        String testKey =
+                "market-data:test:latest-prices:"
+                        + UUID.randomUUID();
+
+        RedisSink sink =
+                new RedisSink(
+                        "localhost",
+                        6379,
+                        testKey
+                );
+
+        sink.start();
+        sink.stop();
+
+        EnrichedMarketEvent event =
+                new EnrichedMarketEvent(
+                        UUID.randomUUID(),
+                        "AAPL",
+                        new BigDecimal("150.2500"),
+                        1000,
+                        Instant.now(),
+                        new BigDecimal("150250.0000")
+                );
+
+        assertThatThrownBy(() -> sink.write(event))
+                .isInstanceOf(IllegalStateException.class);
     }
 }

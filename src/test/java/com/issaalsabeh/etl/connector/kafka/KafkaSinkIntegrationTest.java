@@ -139,4 +139,31 @@ public class KafkaSinkIntegrationTest {
         assertThatThrownBy(() -> sink.write(event))
                 .isInstanceOf(IllegalStateException.class);
     }
+
+    @Test
+    void shouldRejectWritingAfterStop() {
+
+        KafkaSink sink =
+                new KafkaSink(
+                        "localhost:9092",
+                        "market-data-processed"
+                );
+
+        sink.start();
+        sink.stop();
+
+        EnrichedMarketEvent event =
+                new EnrichedMarketEvent(
+                        UUID.randomUUID(),
+                        "AAPL",
+                        new BigDecimal("150.2500"),
+                        1000,
+                        Instant.now(),
+                        new BigDecimal("150250.0000")
+                );
+
+        assertThatThrownBy(() -> sink.write(event))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("not been started");
+    }
 }

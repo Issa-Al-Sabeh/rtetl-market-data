@@ -208,6 +208,33 @@ class PostgresSinkIntegrationTest {
                 );
     }
 
+    @Test
+    void shouldRejectWritingAfterStop() {
+
+        PostgresSink sink =
+                new PostgresSink(
+                        POSTGRES.getJdbcUrl(),
+                        POSTGRES.getUsername(),
+                        POSTGRES.getPassword()
+                );
+
+        sink.start();
+        sink.stop();
+
+        EnrichedMarketEvent event =
+                new EnrichedMarketEvent(
+                        UUID.randomUUID(),
+                        "AAPL",
+                        new BigDecimal("150.2500"),
+                        1000,
+                        Instant.now(),
+                        new BigDecimal("150250.0000")
+                );
+
+        assertThatThrownBy(() -> sink.write(event))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
     private PostgresSink createSink() {
         return new PostgresSink(
                 POSTGRES.getJdbcUrl(),
@@ -226,4 +253,6 @@ class PostgresSinkIntegrationTest {
                 new BigDecimal("600000.0000")
         );
     }
+
+
 }

@@ -2,7 +2,11 @@ package com.issaalsabeh.etl.core;
 
 import com.issaalsabeh.etl.core.dlq.DeadLetterQueue;
 import com.issaalsabeh.etl.core.dlq.DeadLetterRecord;
+import com.issaalsabeh.etl.core.dlq.NoOpDeadLetterQueue;
 import com.issaalsabeh.etl.core.retry.RetryPolicy;
+import com.issaalsabeh.etl.monitoring.PipelineMetrics;
+import io.micrometer.core.instrument.Timer;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayDeque;
@@ -768,6 +772,484 @@ class PipelineExecutorTest {
 
         assertThat(source.isStopped())
                 .isTrue();
+    }
+
+    @Test
+    void shouldRecordProcessingLatencyForProcessedEvent()
+            throws InterruptedException {
+
+        SimpleMeterRegistry registry =
+                new SimpleMeterRegistry();
+
+        PipelineMetrics metrics =
+                new PipelineMetrics(
+                        registry,
+                        "test-pipeline"
+                );
+
+        CountDownLatch eventWritten =
+                new CountDownLatch(1);
+
+        Source<String> source = new Source<>() {
+
+            private boolean started;
+            private boolean emitted;
+
+            @Override
+            public void start() {
+                started = true;
+            }
+
+            @Override
+            public String poll() {
+
+                if (!started) {
+                    throw new IllegalStateException(
+                            "Source not started"
+                    );
+                }
+
+                if (emitted) {
+                    return null;
+                }
+
+                emitted = true;
+
+                return "hello";
+            }
+
+            @Override
+            public void stop() {
+                started = false;
+            }
+
+            @Override
+            public Class<?> getOutputType() {
+                return String.class;
+            }
+        };
+
+        Sink<String> sink = new Sink<>() {
+
+            @Override
+            public void start() {
+            }
+
+            @Override
+            public void write(String data) {
+                eventWritten.countDown();
+            }
+
+            @Override
+            public void stop() {
+            }
+
+            @Override
+            public Class<?> getInputType() {
+                return String.class;
+            }
+        };
+
+        Pipeline<String> pipeline =
+                Pipeline.<String>builder()
+                        .name("test-pipeline")
+                        .source(source)
+                        .sink(sink)
+                        .build();
+
+        PipelineExecutor<String> executor =
+                new PipelineExecutor<>(
+                        pipeline,
+                        RetryPolicy.defaultPolicy(),
+                        new NoOpDeadLetterQueue(),
+                        metrics
+                );
+
+        Thread executorThread =
+                new Thread(executor::start);
+
+        executorThread.start();
+
+        assertThat(
+                eventWritten.await(
+                        2,
+                        TimeUnit.SECONDS
+                )
+        ).isTrue();
+
+        executor.stop();
+
+        executorThread.join(2_000);
+
+        assertThat(executorThread.isAlive())
+                .isFalse();
+
+        Timer timer =
+                registry.get(
+                                "pipeline.event.processing.duration"
+                        )
+                        .tag(
+                                "pipeline",
+                                "test-pipeline"
+                        )
+                        .timer();
+
+        assertThat(timer.count())
+                .isEqualTo(1);
+    }
+
+    @Test
+    void shouldRecordRetriedEventOnceWhenSinkRetriesAndSucceeds()
+            throws InterruptedException {
+
+        SimpleMeterRegistry registry =
+                new SimpleMeterRegistry();
+
+        PipelineMetrics metrics =
+                new PipelineMetrics(
+                        registry,
+                        "test-pipeline"
+                );
+
+        AtomicInteger attempts = new AtomicInteger();
+        CountDownLatch successfulWrite =
+                new CountDownLatch(1);
+
+        Source<String> source = new Source<>() {
+
+            private boolean started;
+            private boolean emitted;
+
+            @Override
+            public void start() {
+                started = true;
+            }
+
+            @Override
+            public String poll() {
+
+                if (!started) {
+                    throw new IllegalStateException(
+                            "Source not started"
+                    );
+                }
+
+                if (emitted) {
+                    return null;
+                }
+
+                emitted = true;
+
+                return "hello";
+            }
+
+            @Override
+            public void stop() {
+                started = false;
+            }
+
+            @Override
+            public Class<?> getOutputType() {
+                return String.class;
+            }
+        };
+
+        Sink<String> sink = new Sink<>() {
+
+            @Override
+            public void start() {
+            }
+
+            @Override
+            public void write(String data) {
+
+                int attempt = attempts.incrementAndGet();
+
+                if (attempt == 1) {
+                    throw new RuntimeException(
+                            "Temporary failure"
+                    );
+                }
+
+                successfulWrite.countDown();
+            }
+
+            @Override
+            public void stop() {
+            }
+
+            @Override
+            public Class<?> getInputType() {
+                return String.class;
+            }
+        };
+
+        Pipeline<String> pipeline =
+                Pipeline.<String>builder()
+                        .name("test-pipeline")
+                        .source(source)
+                        .sink(sink)
+                        .build();
+
+        RetryPolicy retryPolicy =
+                new RetryPolicy(
+                        3,
+                        0,
+                        1.0,
+                        0
+                );
+
+        PipelineExecutor<String> executor =
+                new PipelineExecutor<>(
+                        pipeline,
+                        retryPolicy,
+                        new NoOpDeadLetterQueue(),
+                        metrics
+                );
+
+        Thread executorThread =
+                new Thread(executor::start);
+
+        executorThread.start();
+
+        assertThat(
+                successfulWrite.await(
+                        2,
+                        TimeUnit.SECONDS
+                )
+        ).isTrue();
+
+        double retryCount = 0;
+
+        long deadline =
+                System.currentTimeMillis() + 2_000;
+
+        while (System.currentTimeMillis() < deadline) {
+
+            retryCount =
+                    registry.get("pipeline.events.retried")
+                            .tag(
+                                    "pipeline",
+                                    "test-pipeline"
+                            )
+                            .counter()
+                            .count();
+
+            if (retryCount == 1.0) {
+                break;
+            }
+
+            Thread.sleep(10);
+        }
+
+        executor.stop();
+
+        executorThread.join(2_000);
+
+        assertThat(executorThread.isAlive())
+                .isFalse();
+
+        assertThat(attempts.get())
+                .isEqualTo(2);
+
+        assertThat(retryCount)
+                .isEqualTo(1.0);
+    }
+
+    @Test
+    void shouldRecordFailedEventWhenTransformationFails()
+            throws InterruptedException {
+
+        SimpleMeterRegistry registry =
+                new SimpleMeterRegistry();
+
+        PipelineMetrics metrics =
+                new PipelineMetrics(
+                        registry,
+                        "test-pipeline"
+                );
+
+        CountDownLatch transformationAttempted =
+                new CountDownLatch(1);
+
+        Source<String> source = new Source<>() {
+
+            private boolean started;
+            private boolean emitted;
+
+            @Override
+            public void start() {
+                started = true;
+            }
+
+            @Override
+            public String poll() {
+
+                if (!started) {
+                    throw new IllegalStateException(
+                            "Source not started"
+                    );
+                }
+
+                if (emitted) {
+                    return null;
+                }
+
+                emitted = true;
+
+                return "bad";
+            }
+
+            @Override
+            public void stop() {
+                started = false;
+            }
+
+            @Override
+            public Class<?> getOutputType() {
+                return String.class;
+            }
+        };
+
+        Transformer<String, String> failingTransformer =
+                new Transformer<>() {
+
+                    @Override
+                    public String transform(String input) {
+
+                        transformationAttempted.countDown();
+
+                        throw new IllegalArgumentException(
+                                "Invalid event"
+                        );
+                    }
+
+                    @Override
+                    public Class<?> getInputType() {
+                        return String.class;
+                    }
+
+                    @Override
+                    public Class<?> getOutputType() {
+                        return String.class;
+                    }
+                };
+
+        Sink<String> sink = new Sink<>() {
+
+            @Override
+            public void start() {
+            }
+
+            @Override
+            public void write(String data) {
+            }
+
+            @Override
+            public void stop() {
+            }
+
+            @Override
+            public Class<?> getInputType() {
+                return String.class;
+            }
+        };
+
+        Pipeline<String> pipeline =
+                Pipeline.<String>builder()
+                        .name("test-pipeline")
+                        .source(source)
+                        .transform(failingTransformer)
+                        .sink(sink)
+                        .build();
+
+        PipelineExecutor<String> executor =
+                new PipelineExecutor<>(
+                        pipeline,
+                        new RetryPolicy(
+                                3,
+                                0,
+                                1.0,
+                                0
+                        ),
+                        new NoOpDeadLetterQueue(),
+                        metrics
+                );
+
+        Thread executorThread =
+                new Thread(executor::start);
+
+        executorThread.start();
+
+        assertThat(
+                transformationAttempted.await(
+                        2,
+                        TimeUnit.SECONDS
+                )
+        ).isTrue();
+
+        long deadline =
+                System.currentTimeMillis() + 2_000;
+
+        double failedCount = 0;
+
+        while (System.currentTimeMillis() < deadline) {
+
+            failedCount =
+                    registry.get("pipeline.events.failed")
+                            .tag(
+                                    "pipeline",
+                                    "test-pipeline"
+                            )
+                            .counter()
+                            .count();
+
+            if (failedCount == 1.0) {
+                break;
+            }
+
+            Thread.sleep(10);
+        }
+
+        executor.stop();
+
+        executorThread.join(2_000);
+
+        assertThat(executorThread.isAlive())
+                .isFalse();
+
+        assertThat(failedCount)
+                .isEqualTo(1.0);
+
+        assertThat(
+                registry.get("pipeline.events.processed")
+                        .tag(
+                                "pipeline",
+                                "test-pipeline"
+                        )
+                        .counter()
+                        .count()
+        ).isEqualTo(0.0);
+
+        assertThat(
+                registry.get("pipeline.events.retried")
+                        .tag(
+                                "pipeline",
+                                "test-pipeline"
+                        )
+                        .counter()
+                        .count()
+        ).isEqualTo(0.0);
+
+        assertThat(
+                registry.get("pipeline.events.dlq")
+                        .tag(
+                                "pipeline",
+                                "test-pipeline"
+                        )
+                        .counter()
+                        .count()
+        ).isEqualTo(0.0);
     }
 
 

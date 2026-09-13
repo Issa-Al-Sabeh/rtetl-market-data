@@ -4,6 +4,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.issaalsabeh.etl.core.CommittableSource;
 import com.issaalsabeh.etl.model.MarketEvent;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.binder.MeterBinder;
+import io.micrometer.core.instrument.binder.kafka.KafkaClientMetrics;
 import org.apache.kafka.clients.consumer.*;
 import org.apache.kafka.common.TopicPartition;
 import org.slf4j.Logger;
@@ -12,12 +15,14 @@ import org.slf4j.LoggerFactory;
 import java.time.Duration;
 import java.util.*;
 
-public class KafkaSource implements CommittableSource<MarketEvent> {
+public class KafkaSource implements CommittableSource<MarketEvent>, MeterBinder {
 
     private final String bootstrapServers;
     private final String topic;
     private final String groupId;
     private final String autoOffsetReset;
+
+    private KafkaClientMetrics kafkaClientMetrics;
 
     private KafkaConsumer<String, String> kafkaConsumer;
 
@@ -174,12 +179,17 @@ public class KafkaSource implements CommittableSource<MarketEvent> {
 
         try {
 
+            if (kafkaClientMetrics != null) {
+                kafkaClientMetrics.close();
+            }
+
             if (kafkaConsumer != null) {
                 kafkaConsumer.close();
             }
 
         } finally {
 
+            kafkaClientMetrics = null;
             kafkaConsumer = null;
             queue.clear();
             currentRecord = null;
@@ -225,5 +235,19 @@ public class KafkaSource implements CommittableSource<MarketEvent> {
         );
 
         currentRecord = null;
+    }
+
+    @Override
+    public void bindTo(MeterRegistry registry) {
+        if (kafkaConsumer == null) {
+            throw new IllegalStateException(
+                    "Kafka source must be started before metrics are bound"
+            );
+        }
+
+        kafkaClientMetrics =
+                new KafkaClientMetrics(kafkaConsumer);
+
+        kafkaClientMetrics.bindTo(registry);
     }
 }

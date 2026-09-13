@@ -9,8 +9,14 @@ import com.issaalsabeh.etl.core.dlq.DeadLetterQueue;
 import com.issaalsabeh.etl.core.factory.DeadLetterQueueFactory;
 import com.issaalsabeh.etl.core.factory.PipelineFactory;
 import com.issaalsabeh.etl.core.retry.RetryPolicy;
+import com.issaalsabeh.etl.monitoring.MetricsHttpServer;
+import com.issaalsabeh.etl.monitoring.PipelineMetrics;
+import io.micrometer.prometheusmetrics.PrometheusConfig;
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 
 public class Main {
+
+    private static final int METRICS_PORT = 8080;
 
     public static void main(String[] args) {
 
@@ -22,6 +28,17 @@ public class Main {
 
         Pipeline<?> pipeline =
                 PipelineFactory.create(config);
+
+        PrometheusMeterRegistry prometheusRegistry =
+                new PrometheusMeterRegistry(
+                        PrometheusConfig.DEFAULT
+                );
+
+        PipelineMetrics pipelineMetrics =
+                new PipelineMetrics(
+                        prometheusRegistry,
+                        pipeline.getName()
+                );
 
         PipelineConfig.ConnectorConfig dlqConnector =
                 config.getPipeline()
@@ -42,7 +59,14 @@ public class Main {
                 new PipelineExecutor<>(
                         pipeline,
                         RetryPolicy.defaultPolicy(),
-                        deadLetterQueue
+                        deadLetterQueue,
+                        pipelineMetrics
+                );
+
+        MetricsHttpServer metricsServer =
+                new MetricsHttpServer(
+                        prometheusRegistry,
+                        METRICS_PORT
                 );
 
         Runtime.getRuntime()
@@ -52,13 +76,26 @@ public class Main {
                             executor.stop();
 
                             try {
+
                                 executor.awaitTermination();
+
                             } catch (InterruptedException e) {
+
                                 Thread.currentThread().interrupt();
                             }
                         })
                 );
 
-        executor.start();
+        try {
+
+            metricsServer.start();
+
+            executor.start();
+
+        } finally {
+
+            metricsServer.stop();
+        }
     }
 }
+

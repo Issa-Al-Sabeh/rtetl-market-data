@@ -4,12 +4,17 @@ import com.issaalsabeh.etl.core.dlq.DeadLetterQueue;
 import com.issaalsabeh.etl.core.dlq.DeadLetterRecord;
 import com.issaalsabeh.etl.core.dlq.NoOpDeadLetterQueue;
 import com.issaalsabeh.etl.core.retry.RetryPolicy;
+import com.issaalsabeh.etl.monitoring.PipelineMetrics;
+import io.micrometer.core.instrument.Timer;
+import io.micrometer.core.instrument.binder.MeterBinder;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 
 import java.time.Instant;
 import java.util.concurrent.CountDownLatch;
+
 
 public class PipelineExecutor<T> {
 
@@ -26,11 +31,15 @@ public class PipelineExecutor<T> {
 
     private final CountDownLatch terminated = new CountDownLatch(1);
 
+    private final PipelineMetrics metrics;
+
+
     public PipelineExecutor(Pipeline<T> pipeline) {
         this(
                 pipeline,
                 RetryPolicy.defaultPolicy(),
-                new NoOpDeadLetterQueue()
+                new NoOpDeadLetterQueue(),
+                createDefaultMetrics(pipeline)
         );
     }
 
@@ -41,7 +50,8 @@ public class PipelineExecutor<T> {
         this(
                 pipeline,
                 retryPolicy,
-                new NoOpDeadLetterQueue()
+                new NoOpDeadLetterQueue(),
+                createDefaultMetrics(pipeline)
         );
     }
 
@@ -50,6 +60,20 @@ public class PipelineExecutor<T> {
             RetryPolicy retryPolicy,
             DeadLetterQueue deadLetterQueue
     ) {
+        this(
+                pipeline,
+                retryPolicy,
+                deadLetterQueue,
+                createDefaultMetrics(pipeline)
+        );
+    }
+
+    public PipelineExecutor(
+            Pipeline<T> pipeline,
+            RetryPolicy retryPolicy,
+            DeadLetterQueue deadLetterQueue,
+            PipelineMetrics metrics) {
+
         if (pipeline == null) {
             throw new IllegalArgumentException(
                     "Pipeline cannot be null"
@@ -68,10 +92,33 @@ public class PipelineExecutor<T> {
             );
         }
 
+        if (metrics == null) {
+            throw new IllegalArgumentException(
+                    "Pipeline Metrics cannot be null"
+            );
+        }
+
         this.pipeline = pipeline;
         this.retryPolicy = retryPolicy;
         this.deadLetterQueue = deadLetterQueue;
         this.shutdownRequested = false;
+        this.metrics = metrics;
+    }
+
+    private static PipelineMetrics createDefaultMetrics(
+            Pipeline<?> pipeline
+    ) {
+
+        if (pipeline == null) {
+            throw new IllegalArgumentException(
+                    "Pipeline cannot be null"
+            );
+        }
+
+        return new PipelineMetrics(
+                new SimpleMeterRegistry(),
+                pipeline.getName()
+        );
     }
 
     public void start() {
@@ -89,6 +136,12 @@ public class PipelineExecutor<T> {
 
             try {
                 pipeline.getSource().start();
+
+                if (pipeline.getSource() instanceof MeterBinder meterBinder) {
+                    meterBinder
+                            .bindTo(metrics.getRegistry());
+                }
+
             } finally {
                 MDC.remove("connector");
             }
@@ -141,6 +194,11 @@ public class PipelineExecutor<T> {
                     break;
                 }
 
+                metrics.recordReceived();
+
+                Timer.Sample processingSample =
+                        metrics.startProcessingTimer();
+
                 String eventId = getEventId(event);
 
                 if (eventId != null) {
@@ -174,6 +232,8 @@ public class PipelineExecutor<T> {
                                 e.getMessage()
                         );
 
+                        metrics.recordFailed();
+
                         if (pipeline.getSource()
                                 instanceof CommittableSource<?> source) {
 
@@ -193,6 +253,8 @@ public class PipelineExecutor<T> {
                     }
 
                     boolean eventHandled = true;
+                    boolean eventRetried = false;
+                    boolean eventFailed = false;
 
                     for (Sink<?> sink : pipeline.getSinks()) {
 
@@ -210,19 +272,28 @@ public class PipelineExecutor<T> {
                             Sink<Object> typedSink =
                                     (Sink<Object>) sink;
 
-                            boolean sinkHandled =
+                            SinkWriteResult result =
                                     writeWithRetry(
                                             typedSink,
                                             current
                                     );
 
-                            if (!sinkHandled) {
+                            if (result.retryCount() > 0) {
+                                eventRetried = true;
+                            }
+
+                            if (result.outcome() != SinkWriteOutcome.SUCCESS) {
+                                eventFailed = true;
+                            }
+
+                            if (result.outcome() == SinkWriteOutcome.UNRESOLVED) {
                                 eventHandled = false;
                             }
 
                         } catch (Exception e) {
 
                             eventHandled = false;
+                            eventFailed = true;
 
                             logger.error(
                                     "sink_handling_failed errorType={} errorMessage={}",
@@ -235,6 +306,16 @@ public class PipelineExecutor<T> {
 
                             MDC.remove("connector");
                         }
+                    }
+
+                    if (eventRetried) {
+                        metrics.recordRetried();
+                    }
+
+                    if (eventFailed) {
+                        metrics.recordFailed();
+                    } else {
+                        metrics.recordProcessed();
                     }
 
                     if (!eventHandled) {
@@ -262,6 +343,8 @@ public class PipelineExecutor<T> {
                     }
 
                 } finally {
+
+                    metrics.recordProcessingLatency(processingSample);
 
                     MDC.remove("eventId");
                     MDC.remove("connector");
@@ -291,7 +374,7 @@ public class PipelineExecutor<T> {
         shutdownRequested = true;
     }
 
-    private boolean writeWithRetry(
+    private SinkWriteResult writeWithRetry(
             Sink<Object> sink,
             Object event
     ) {
@@ -303,7 +386,11 @@ public class PipelineExecutor<T> {
             try {
 
                 sink.write(event);
-                return true;
+
+                return new SinkWriteResult(
+                        SinkWriteOutcome.SUCCESS,
+                        attempt - 1
+                );
 
             } catch (Exception e) {
 
@@ -341,13 +428,18 @@ public class PipelineExecutor<T> {
 
                         deadLetterQueue.publish(record);
 
+                        metrics.recordDlq();
+
                         logger.warn(
                                 "event_dead_lettered failedSink={} retryCount={}",
                                 sink.getClass().getSimpleName(),
                                 attempt - 1
                         );
 
-                        return true;
+                        return new SinkWriteResult(
+                                SinkWriteOutcome.DEAD_LETTERED,
+                                attempt - 1
+                        );
 
                     } catch (Exception dlqException) {
 
@@ -359,7 +451,10 @@ public class PipelineExecutor<T> {
                                 dlqException
                         );
 
-                        return false;
+                        return new SinkWriteResult(
+                                SinkWriteOutcome.UNRESOLVED,
+                                attempt - 1
+                        );
 
                     } finally {
 
@@ -400,12 +495,18 @@ public class PipelineExecutor<T> {
                             retryPolicy.maxAttempts()
                     );
 
-                    return false;
+                    return new SinkWriteResult(
+                            SinkWriteOutcome.UNRESOLVED,
+                            attempt - 1
+                    );
                 }
             }
         }
 
-        return false;
+        return new SinkWriteResult(
+                SinkWriteOutcome.UNRESOLVED,
+                retryPolicy.maxAttempts() - 1
+        );
     }
 
     public void awaitTermination() throws InterruptedException {
@@ -496,5 +597,17 @@ public class PipelineExecutor<T> {
         }
 
         return null;
+    }
+
+    private enum SinkWriteOutcome {
+        SUCCESS,
+        DEAD_LETTERED,
+        UNRESOLVED
+    }
+
+    private record SinkWriteResult(
+            SinkWriteOutcome outcome,
+            int retryCount
+    ) {
     }
 }

@@ -1,3 +1,4 @@
+
 package com.issaalsabeh.etl.monitoring;
 
 import com.sun.net.httpserver.HttpExchange;
@@ -8,17 +9,44 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class MetricsHttpServer {
 
+    private static final int HTTP_THREADS = 4;
+
+    private static final int SHUTDOWN_TIMEOUT_SECONDS = 3;
+
+    private static final AtomicInteger THREAD_COUNTER =
+            new AtomicInteger();
+
     private final PrometheusMeterRegistry registry;
+
     private final int port;
 
+    private final HealthService healthService;
+
     private HttpServer server;
+
+    private ExecutorService httpExecutor;
+
 
     public MetricsHttpServer(
             PrometheusMeterRegistry registry,
             int port
+    ) {
+
+        this(registry, port, null);
+    }
+
+
+    public MetricsHttpServer(
+            PrometheusMeterRegistry registry,
+            int port,
+            HealthService healthService
     ) {
 
         if (registry == null) {
@@ -27,17 +55,19 @@ public class MetricsHttpServer {
             );
         }
 
-        if (port < 1 || port > 65535) {
+        if (port < 0 || port > 65535) {
             throw new IllegalArgumentException(
-                    "Port must be between 1 and 65535"
+                    "Port must be between 0 and 65535"
             );
         }
 
         this.registry = registry;
         this.port = port;
+        this.healthService = healthService;
     }
 
-    public void start() {
+
+    public synchronized void start() {
 
         if (server != null) {
             throw new IllegalStateException(
@@ -45,25 +75,67 @@ public class MetricsHttpServer {
             );
         }
 
+        HttpServer newServer = null;
+
+        ExecutorService newExecutor = null;
+
         try {
 
-            server = HttpServer.create(
+            newServer = HttpServer.create(
                     new InetSocketAddress(port),
                     0
             );
 
-            server.createContext(
+            newServer.createContext(
                     "/metrics",
                     this::handleMetrics
             );
 
-            server.setExecutor(null);
+            if (healthService != null) {
 
-            server.start();
+                newServer.createContext(
+                        "/health",
+                        new HealthHttpHandler(
+                                healthService
+                        )
+                );
+            }
 
-        } catch (IOException e) {
+            newExecutor =
+                    Executors.newFixedThreadPool(
+                            HTTP_THREADS,
+                            task -> {
 
-            server = null;
+                                Thread thread = new Thread(
+                                        task,
+                                        "rtetl-monitoring-http-"
+                                                + THREAD_COUNTER
+                                                .incrementAndGet()
+                                );
+
+                                thread.setDaemon(true);
+
+                                return thread;
+                            }
+                    );
+
+            newServer.setExecutor(newExecutor);
+
+            newServer.start();
+
+            server = newServer;
+
+            httpExecutor = newExecutor;
+
+        } catch (IOException | RuntimeException e) {
+
+            if (newServer != null) {
+                newServer.stop(0);
+            }
+
+            if (newExecutor != null) {
+                newExecutor.shutdownNow();
+            }
 
             throw new IllegalStateException(
                     "Failed to start metrics HTTP server",
@@ -71,6 +143,7 @@ public class MetricsHttpServer {
             );
         }
     }
+
 
     private void handleMetrics(
             HttpExchange exchange
@@ -111,7 +184,20 @@ public class MetricsHttpServer {
         }
     }
 
-    public void stop() {
+
+    public synchronized int getBoundPort() {
+
+        if (server == null) {
+            throw new IllegalStateException(
+                    "HTTP server is not running"
+            );
+        }
+
+        return server.getAddress().getPort();
+    }
+
+
+    public synchronized void stop() {
 
         if (server == null) {
             return;
@@ -120,5 +206,31 @@ public class MetricsHttpServer {
         server.stop(0);
 
         server = null;
+
+        if (httpExecutor != null) {
+
+            httpExecutor.shutdown();
+
+            try {
+
+                if (!httpExecutor.awaitTermination(
+                        SHUTDOWN_TIMEOUT_SECONDS,
+                        TimeUnit.SECONDS
+                )) {
+
+                    httpExecutor.shutdownNow();
+                }
+
+            } catch (InterruptedException e) {
+
+                httpExecutor.shutdownNow();
+
+                Thread.currentThread().interrupt();
+
+            } finally {
+
+                httpExecutor = null;
+            }
+        }
     }
 }

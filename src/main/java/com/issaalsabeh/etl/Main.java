@@ -1,3 +1,4 @@
+
 package com.issaalsabeh.etl;
 
 import com.issaalsabeh.etl.config.DeadLetterQueueConfig;
@@ -9,10 +10,16 @@ import com.issaalsabeh.etl.core.dlq.DeadLetterQueue;
 import com.issaalsabeh.etl.core.factory.DeadLetterQueueFactory;
 import com.issaalsabeh.etl.core.factory.PipelineFactory;
 import com.issaalsabeh.etl.core.retry.RetryPolicy;
+import com.issaalsabeh.etl.monitoring.HealthCheck;
+import com.issaalsabeh.etl.monitoring.HealthCheckFactory;
+import com.issaalsabeh.etl.monitoring.HealthService;
 import com.issaalsabeh.etl.monitoring.MetricsHttpServer;
 import com.issaalsabeh.etl.monitoring.PipelineMetrics;
+
 import io.micrometer.prometheusmetrics.PrometheusConfig;
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
+
+import java.util.List;
 
 public class Main {
 
@@ -63,10 +70,20 @@ public class Main {
                         pipelineMetrics
                 );
 
+        List<HealthCheck> healthChecks =
+                HealthCheckFactory.create(config);
+
+        HealthService healthService =
+                new HealthService(
+                        executor::getState,
+                        healthChecks
+                );
+
         MetricsHttpServer metricsServer =
                 new MetricsHttpServer(
                         prometheusRegistry,
-                        METRICS_PORT
+                        METRICS_PORT,
+                        healthService
                 );
 
         Runtime.getRuntime()
@@ -98,4 +115,3 @@ public class Main {
         }
     }
 }
-

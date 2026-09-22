@@ -1,3 +1,4 @@
+
 package com.issaalsabeh.etl.core;
 
 import com.issaalsabeh.etl.core.dlq.DeadLetterQueue;
@@ -5,16 +6,17 @@ import com.issaalsabeh.etl.core.dlq.DeadLetterRecord;
 import com.issaalsabeh.etl.core.dlq.NoOpDeadLetterQueue;
 import com.issaalsabeh.etl.core.retry.RetryPolicy;
 import com.issaalsabeh.etl.monitoring.PipelineMetrics;
+
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.binder.MeterBinder;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 
 import java.time.Instant;
 import java.util.concurrent.CountDownLatch;
-
 
 public class PipelineExecutor<T> {
 
@@ -29,12 +31,21 @@ public class PipelineExecutor<T> {
 
     private final DeadLetterQueue deadLetterQueue;
 
-    private final CountDownLatch terminated = new CountDownLatch(1);
+    private final CountDownLatch terminated =
+            new CountDownLatch(1);
 
     private final PipelineMetrics metrics;
 
+    private volatile PipelineState state =
+            PipelineState.STOPPED;
+
+
+    // =========================================================
+    // Constructors
+    // =========================================================
 
     public PipelineExecutor(Pipeline<T> pipeline) {
+
         this(
                 pipeline,
                 RetryPolicy.defaultPolicy(),
@@ -47,6 +58,7 @@ public class PipelineExecutor<T> {
             Pipeline<T> pipeline,
             RetryPolicy retryPolicy
     ) {
+
         this(
                 pipeline,
                 retryPolicy,
@@ -60,6 +72,7 @@ public class PipelineExecutor<T> {
             RetryPolicy retryPolicy,
             DeadLetterQueue deadLetterQueue
     ) {
+
         this(
                 pipeline,
                 retryPolicy,
@@ -72,7 +85,8 @@ public class PipelineExecutor<T> {
             Pipeline<T> pipeline,
             RetryPolicy retryPolicy,
             DeadLetterQueue deadLetterQueue,
-            PipelineMetrics metrics) {
+            PipelineMetrics metrics
+    ) {
 
         if (pipeline == null) {
             throw new IllegalArgumentException(
@@ -105,6 +119,21 @@ public class PipelineExecutor<T> {
         this.metrics = metrics;
     }
 
+
+    // =========================================================
+    // Pipeline State
+    // =========================================================
+
+    public PipelineState getState() {
+
+        return state;
+    }
+
+
+    // =========================================================
+    // Default Metrics
+    // =========================================================
+
     private static PipelineMetrics createDefaultMetrics(
             Pipeline<?> pipeline
     ) {
@@ -121,41 +150,81 @@ public class PipelineExecutor<T> {
         );
     }
 
+
+    // =========================================================
+    // Start Pipeline
+    // =========================================================
+
     public void start() {
 
         MDC.put("pipeline", pipeline.getName());
 
+        state = PipelineState.STARTING;
+
+        boolean failed = false;
+
         try {
+
+            // -------------------------------------------------
+            // Validate Pipeline
+            // -------------------------------------------------
 
             pipeline.validate();
 
+
+            // -------------------------------------------------
+            // Start Source
+            // -------------------------------------------------
+
             MDC.put(
                     "connector",
-                    pipeline.getSource().getClass().getSimpleName()
+                    pipeline.getSource()
+                            .getClass()
+                            .getSimpleName()
             );
 
             try {
+
                 pipeline.getSource().start();
 
-                if (pipeline.getSource() instanceof MeterBinder meterBinder) {
-                    meterBinder
-                            .bindTo(metrics.getRegistry());
+                if (pipeline.getSource()
+                        instanceof MeterBinder meterBinder) {
+
+                    meterBinder.bindTo(
+                            metrics.getRegistry()
+                    );
                 }
 
             } finally {
+
                 MDC.remove("connector");
             }
+
+
+            // -------------------------------------------------
+            // Start Dead Letter Queue
+            // -------------------------------------------------
 
             MDC.put(
                     "connector",
-                    deadLetterQueue.getClass().getSimpleName()
+                    deadLetterQueue
+                            .getClass()
+                            .getSimpleName()
             );
 
             try {
+
                 deadLetterQueue.start();
+
             } finally {
+
                 MDC.remove("connector");
             }
+
+
+            // -------------------------------------------------
+            // Start Sinks
+            // -------------------------------------------------
 
             for (Sink<?> sink : pipeline.getSinks()) {
 
@@ -165,51 +234,102 @@ public class PipelineExecutor<T> {
                 );
 
                 try {
+
                     sink.start();
+
                 } finally {
+
                     MDC.remove("connector");
                 }
             }
+
+
+            // -------------------------------------------------
+            // Pipeline Successfully Initialized
+            // -------------------------------------------------
+
+            state = shutdownRequested
+                    ? PipelineState.STOPPING
+                    : PipelineState.RUNNING;
+
+
+            // -------------------------------------------------
+            // Main Processing Loop
+            // -------------------------------------------------
 
             while (!shutdownRequested) {
 
                 T event;
 
+
+                // ---------------------------------------------
+                // Poll Source
+                // ---------------------------------------------
+
                 MDC.put(
                         "connector",
-                        pipeline.getSource().getClass().getSimpleName()
+                        pipeline.getSource()
+                                .getClass()
+                                .getSimpleName()
                 );
 
                 try {
+
                     event = pipeline.getSource().poll();
+
                 } finally {
+
                     MDC.remove("connector");
                 }
+
 
                 if (event == null) {
                     continue;
                 }
 
+
+                // Do not begin processing another event
+                // if shutdown has already been requested.
+
                 if (shutdownRequested) {
                     break;
                 }
+
+
+                // ---------------------------------------------
+                // Record Received Event
+                // ---------------------------------------------
 
                 metrics.recordReceived();
 
                 Timer.Sample processingSample =
                         metrics.startProcessingTimer();
 
+
+                // ---------------------------------------------
+                // Set Event Logging Context
+                // ---------------------------------------------
+
                 String eventId = getEventId(event);
 
                 if (eventId != null) {
+
                     MDC.put("eventId", eventId);
+
                 } else {
+
                     MDC.remove("eventId");
                 }
+
 
                 try {
 
                     Object current = event;
+
+
+                    // -----------------------------------------
+                    // Apply Transformations
+                    // -----------------------------------------
 
                     try {
 
@@ -234,6 +354,10 @@ public class PipelineExecutor<T> {
 
                         metrics.recordFailed();
 
+
+                        // Commit rejected events so that invalid
+                        // data does not block the stream.
+
                         if (pipeline.getSource()
                                 instanceof CommittableSource<?> source) {
 
@@ -243,8 +367,11 @@ public class PipelineExecutor<T> {
                             );
 
                             try {
+
                                 source.commit();
+
                             } finally {
+
                                 MDC.remove("connector");
                             }
                         }
@@ -252,9 +379,15 @@ public class PipelineExecutor<T> {
                         continue;
                     }
 
+
+                    // -----------------------------------------
+                    // Write Event to Sinks
+                    // -----------------------------------------
+
                     boolean eventHandled = true;
                     boolean eventRetried = false;
                     boolean eventFailed = false;
+
 
                     for (Sink<?> sink : pipeline.getSinks()) {
 
@@ -272,21 +405,30 @@ public class PipelineExecutor<T> {
                             Sink<Object> typedSink =
                                     (Sink<Object>) sink;
 
+
                             SinkWriteResult result =
                                     writeWithRetry(
                                             typedSink,
                                             current
                                     );
 
+
                             if (result.retryCount() > 0) {
+
                                 eventRetried = true;
                             }
 
-                            if (result.outcome() != SinkWriteOutcome.SUCCESS) {
+
+                            if (result.outcome()
+                                    != SinkWriteOutcome.SUCCESS) {
+
                                 eventFailed = true;
                             }
 
-                            if (result.outcome() == SinkWriteOutcome.UNRESOLVED) {
+
+                            if (result.outcome()
+                                    == SinkWriteOutcome.UNRESOLVED) {
+
                                 eventHandled = false;
                             }
 
@@ -308,15 +450,30 @@ public class PipelineExecutor<T> {
                         }
                     }
 
+
+                    // -----------------------------------------
+                    // Record Event Metrics
+                    // -----------------------------------------
+
                     if (eventRetried) {
+
                         metrics.recordRetried();
                     }
 
+
                     if (eventFailed) {
+
                         metrics.recordFailed();
+
                     } else {
+
                         metrics.recordProcessed();
                     }
+
+
+                    // -----------------------------------------
+                    // Stop Pipeline if Event is Unresolved
+                    // -----------------------------------------
 
                     if (!eventHandled) {
 
@@ -324,8 +481,19 @@ public class PipelineExecutor<T> {
                                 "event_unresolved stoppingPipeline=true reason=no_sink_or_dlq_acceptance"
                         );
 
+                        // PHASE 23:
+                        // An unresolved event is a pipeline failure,
+                        // not a successful shutdown.
+
+                        failed = true;
+
                         break;
                     }
+
+
+                    // -----------------------------------------
+                    // Commit Source Offset
+                    // -----------------------------------------
 
                     if (pipeline.getSource()
                             instanceof CommittableSource<?> source) {
@@ -336,32 +504,96 @@ public class PipelineExecutor<T> {
                         );
 
                         try {
+
                             source.commit();
+
                         } finally {
+
                             MDC.remove("connector");
                         }
                     }
 
+
                 } finally {
 
-                    metrics.recordProcessingLatency(processingSample);
+                    // -----------------------------------------
+                    // Record Processing Latency
+                    // -----------------------------------------
+
+                    metrics.recordProcessingLatency(
+                            processingSample
+                    );
+
+
+                    // -----------------------------------------
+                    // Clear Event Logging Context
+                    // -----------------------------------------
 
                     MDC.remove("eventId");
                     MDC.remove("connector");
                 }
             }
 
+
+        } catch (RuntimeException | Error e) {
+
+            // -------------------------------------------------
+            // Unexpected Pipeline Failure
+            // -------------------------------------------------
+
+            failed = true;
+
+            throw e;
+
+
         } finally {
 
+            // -------------------------------------------------
+            // Begin Pipeline Cleanup
+            // -------------------------------------------------
+
+            if (!failed) {
+
+                state = PipelineState.STOPPING;
+            }
+
             shutdownRequested = false;
+
 
             try {
 
                 cleanupResources();
 
+            } catch (RuntimeException | Error e) {
+
+                // An unexpected cleanup failure must also
+                // be reflected in the final pipeline state.
+
+                failed = true;
+
+                throw e;
+
             } finally {
 
+                // ---------------------------------------------
+                // Set Final Pipeline State
+                // ---------------------------------------------
+
+                state = failed
+                        ? PipelineState.FAILED
+                        : PipelineState.STOPPED;
+
+
+                // ---------------------------------------------
+                // Signal Termination
+                // ---------------------------------------------
+
                 terminated.countDown();
+
+
+                // ---------------------------------------------
+                // Clear Logging Context
+                // ---------------------------------------------
 
                 MDC.remove("connector");
                 MDC.remove("eventId");
@@ -370,9 +602,26 @@ public class PipelineExecutor<T> {
         }
     }
 
-    public void stop(){
+
+    // =========================================================
+    // Request Graceful Shutdown
+    // =========================================================
+
+    public void stop() {
+
         shutdownRequested = true;
+
+        if (state == PipelineState.RUNNING
+                || state == PipelineState.STARTING) {
+
+            state = PipelineState.STOPPING;
+        }
     }
+
+
+    // =========================================================
+    // Write to Sink with Retry
+    // =========================================================
 
     private SinkWriteResult writeWithRetry(
             Sink<Object> sink,
@@ -387,12 +636,18 @@ public class PipelineExecutor<T> {
 
                 sink.write(event);
 
+
                 return new SinkWriteResult(
                         SinkWriteOutcome.SUCCESS,
                         attempt - 1
                 );
 
+
             } catch (Exception e) {
+
+                // ---------------------------------------------
+                // Final Retry Attempt Failed
+                // ---------------------------------------------
 
                 if (attempt == retryPolicy.maxAttempts()) {
 
@@ -404,6 +659,7 @@ public class PipelineExecutor<T> {
                             e
                     );
 
+
                     DeadLetterRecord record =
                             new DeadLetterRecord(
                                     event,
@@ -413,6 +669,11 @@ public class PipelineExecutor<T> {
                                     Instant.now(),
                                     attempt - 1
                             );
+
+
+                    // -----------------------------------------
+                    // Switch Logging Context to DLQ
+                    // -----------------------------------------
 
                     String previousConnector =
                             MDC.get("connector");
@@ -424,11 +685,13 @@ public class PipelineExecutor<T> {
                                     .getSimpleName()
                     );
 
+
                     try {
 
                         deadLetterQueue.publish(record);
 
                         metrics.recordDlq();
+
 
                         logger.warn(
                                 "event_dead_lettered failedSink={} retryCount={}",
@@ -436,10 +699,12 @@ public class PipelineExecutor<T> {
                                 attempt - 1
                         );
 
+
                         return new SinkWriteResult(
                                 SinkWriteOutcome.DEAD_LETTERED,
                                 attempt - 1
                         );
+
 
                     } catch (Exception dlqException) {
 
@@ -451,26 +716,41 @@ public class PipelineExecutor<T> {
                                 dlqException
                         );
 
+
                         return new SinkWriteResult(
                                 SinkWriteOutcome.UNRESOLVED,
                                 attempt - 1
                         );
 
+
                     } finally {
 
+                        // -------------------------------------
+                        // Restore Previous Logging Context
+                        // -------------------------------------
+
                         if (previousConnector != null) {
+
                             MDC.put(
                                     "connector",
                                     previousConnector
                             );
+
                         } else {
+
                             MDC.remove("connector");
                         }
                     }
                 }
 
+
+                // ---------------------------------------------
+                // Calculate Retry Delay
+                // ---------------------------------------------
+
                 long delay =
                         retryPolicy.getDelayMillis(attempt);
+
 
                 logger.warn(
                         "sink_retry attempt={} maxAttempts={} delayMs={} errorType={} errorMessage={}",
@@ -481,6 +761,11 @@ public class PipelineExecutor<T> {
                         e.getMessage()
                 );
 
+
+                // ---------------------------------------------
+                // Wait Before Retrying
+                // ---------------------------------------------
+
                 try {
 
                     Thread.sleep(delay);
@@ -489,11 +774,13 @@ public class PipelineExecutor<T> {
 
                     Thread.currentThread().interrupt();
 
+
                     logger.warn(
                             "sink_retry_interrupted attempt={} maxAttempts={}",
                             attempt,
                             retryPolicy.maxAttempts()
                     );
+
 
                     return new SinkWriteResult(
                             SinkWriteOutcome.UNRESOLVED,
@@ -503,17 +790,34 @@ public class PipelineExecutor<T> {
             }
         }
 
+
         return new SinkWriteResult(
                 SinkWriteOutcome.UNRESOLVED,
                 retryPolicy.maxAttempts() - 1
         );
     }
 
+
+    // =========================================================
+    // Wait for Pipeline Termination
+    // =========================================================
+
     public void awaitTermination() throws InterruptedException {
+
         terminated.await();
     }
 
+
+    // =========================================================
+    // Cleanup Resources
+    // =========================================================
+
     private void cleanupResources() {
+
+
+        // -----------------------------------------------------
+        // Stop Sinks
+        // -----------------------------------------------------
 
         for (Sink<?> sink : pipeline.getSinks()) {
 
@@ -541,6 +845,11 @@ public class PipelineExecutor<T> {
             }
         }
 
+
+        // -----------------------------------------------------
+        // Stop Dead Letter Queue
+        // -----------------------------------------------------
+
         MDC.put(
                 "connector",
                 deadLetterQueue.getClass().getSimpleName()
@@ -564,9 +873,16 @@ public class PipelineExecutor<T> {
             MDC.remove("connector");
         }
 
+
+        // -----------------------------------------------------
+        // Stop Source
+        // -----------------------------------------------------
+
         MDC.put(
                 "connector",
-                pipeline.getSource().getClass().getSimpleName()
+                pipeline.getSource()
+                        .getClass()
+                        .getSimpleName()
         );
 
         try {
@@ -588,6 +904,11 @@ public class PipelineExecutor<T> {
         }
     }
 
+
+    // =========================================================
+    // Extract Event Identifier
+    // =========================================================
+
     private String getEventId(Object event) {
 
         if (event instanceof IdentifiableEvent identifiable
@@ -599,11 +920,18 @@ public class PipelineExecutor<T> {
         return null;
     }
 
+
+    // =========================================================
+    // Sink Write Outcomes
+    // =========================================================
+
     private enum SinkWriteOutcome {
+
         SUCCESS,
         DEAD_LETTERED,
         UNRESOLVED
     }
+
 
     private record SinkWriteResult(
             SinkWriteOutcome outcome,

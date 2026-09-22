@@ -17,10 +17,15 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
 
 class PipelineExecutorTest {
 
@@ -1250,6 +1255,437 @@ class PipelineExecutorTest {
                         .counter()
                         .count()
         ).isEqualTo(0.0);
+    }
+
+
+    @Test
+    void shouldInitiallyBeStopped() {
+
+        Source<String> source = createLifecycleSource();
+        Sink<String> sink = createLifecycleSink();
+
+        PipelineExecutor<String> executor =
+                createLifecycleExecutor(source, sink);
+
+        assertThat(executor.getState())
+                .isEqualTo(PipelineState.STOPPED);
+    }
+
+
+    @Test
+    void shouldTransitionFromStartingToRunning() throws Exception {
+
+        Source<String> source = createLifecycleSource();
+        Sink<String> sink = createLifecycleSink();
+
+        CountDownLatch startupEntered =
+                new CountDownLatch(1);
+
+        CountDownLatch allowStartup =
+                new CountDownLatch(1);
+
+        doAnswer(invocation -> {
+
+            startupEntered.countDown();
+
+            if (!allowStartup.await(5, TimeUnit.SECONDS)) {
+                throw new IllegalStateException(
+                        "Timed out waiting for startup"
+                );
+            }
+
+            return null;
+
+        }).when(source).start();
+
+        when(source.poll()).thenAnswer(invocation -> {
+            Thread.sleep(10);
+            return null;
+        });
+
+        PipelineExecutor<String> executor =
+                createLifecycleExecutor(source, sink);
+
+        AtomicReference<Throwable> failure =
+                new AtomicReference<>();
+
+        Thread executorThread =
+                startLifecycleThread(executor, failure);
+
+        try {
+
+            // Wait until source initialization has started.
+
+            assertThat(
+                    startupEntered.await(3, TimeUnit.SECONDS)
+            ).isTrue();
+
+            assertThat(executor.getState())
+                    .isEqualTo(PipelineState.STARTING);
+
+
+            // Allow source initialization to finish.
+
+            allowStartup.countDown();
+
+
+            // Wait until all connectors have started.
+
+            awaitLifecycleState(
+                    executor,
+                    PipelineState.RUNNING
+            );
+
+            assertThat(executor.getState())
+                    .isEqualTo(PipelineState.RUNNING);
+
+            verify(source).start();
+            verify(sink).start();
+
+        } finally {
+
+            allowStartup.countDown();
+
+            executor.stop();
+
+            executorThread.join(3000);
+        }
+
+        assertThat(executorThread.isAlive())
+                .isFalse();
+
+        assertThat(failure.get())
+                .isNull();
+
+        assertThat(executor.getState())
+                .isEqualTo(PipelineState.STOPPED);
+    }
+
+
+    @Test
+    void shouldTransitionFromRunningToStoppingAndStopped()
+            throws Exception {
+
+        Source<String> source = createLifecycleSource();
+        Sink<String> sink = createLifecycleSink();
+
+        AtomicBoolean firstPoll =
+                new AtomicBoolean(true);
+
+        CountDownLatch writeEntered =
+                new CountDownLatch(1);
+
+        CountDownLatch allowWrite =
+                new CountDownLatch(1);
+
+
+        // Return one event, then no more events.
+
+        when(source.poll()).thenAnswer(invocation -> {
+
+            if (firstPoll.getAndSet(false)) {
+                return "hello";
+            }
+
+            return null;
+        });
+
+
+        // Block the sink while processing the first event.
+
+        doAnswer(invocation -> {
+
+            writeEntered.countDown();
+
+            if (!allowWrite.await(5, TimeUnit.SECONDS)) {
+                throw new IllegalStateException(
+                        "Timed out waiting for sink write"
+                );
+            }
+
+            return null;
+
+        }).when(sink).write(any(String.class));
+
+
+        PipelineExecutor<String> executor =
+                createLifecycleExecutor(source, sink);
+
+        AtomicReference<Throwable> failure =
+                new AtomicReference<>();
+
+        Thread executorThread =
+                startLifecycleThread(executor, failure);
+
+        try {
+
+            awaitLifecycleState(
+                    executor,
+                    PipelineState.RUNNING
+            );
+
+
+            // Wait until the first event reaches the sink.
+
+            assertThat(
+                    writeEntered.await(3, TimeUnit.SECONDS)
+            ).isTrue();
+
+
+            // Request shutdown while the event is in flight.
+
+            executor.stop();
+
+
+            // The executor should not be STOPPED yet.
+
+            assertThat(executor.getState())
+                    .isEqualTo(PipelineState.STOPPING);
+
+            assertThat(executorThread.isAlive())
+                    .isTrue();
+
+
+            // Allow the current event to finish processing.
+
+            allowWrite.countDown();
+
+            executorThread.join(3000);
+
+
+            assertThat(executorThread.isAlive())
+                    .isFalse();
+
+            assertThat(executor.getState())
+                    .isEqualTo(PipelineState.STOPPED);
+
+
+            // Verify cleanup completed.
+
+            verify(sink).stop();
+            verify(source).stop();
+
+            assertThat(failure.get())
+                    .isNull();
+
+        } finally {
+
+            allowWrite.countDown();
+
+            executor.stop();
+
+            executorThread.join(3000);
+        }
+    }
+
+
+    @Test
+    void shouldTransitionToFailedWhenConnectorStartupFails() {
+
+        Source<String> source = createLifecycleSource();
+        Sink<String> sink = createLifecycleSink();
+
+
+        // Simulate a failure during sink initialization.
+
+        doThrow(
+                new IllegalStateException("Sink startup failed")
+        ).when(sink).start();
+
+
+        PipelineExecutor<String> executor =
+                createLifecycleExecutor(source, sink);
+
+
+        assertThatThrownBy(executor::start)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Sink startup failed");
+
+
+        // The executor must report a failure.
+
+        assertThat(executor.getState())
+                .isEqualTo(PipelineState.FAILED);
+
+
+        // Verify that resource cleanup still happened.
+
+        verify(source).stop();
+        verify(sink).stop();
+    }
+
+
+    @Test
+    void shouldTransitionToFailedWhenEventCannotBeHandled() {
+
+        Source<String> source = createLifecycleSource();
+        Sink<String> sink = createLifecycleSink();
+
+        DeadLetterQueue deadLetterQueue =
+                mock(DeadLetterQueue.class);
+
+
+        // The source provides one event.
+
+        when(source.poll())
+                .thenReturn("hello");
+
+
+        // Simulate a permanent sink failure.
+
+        doThrow(
+                new IllegalStateException("Sink unavailable")
+        ).when(sink).write(any(String.class));
+
+
+        // Simulate the dead-letter queue being unavailable.
+
+        doThrow(
+                new IllegalStateException("DLQ unavailable")
+        ).when(deadLetterQueue).publish(any());
+
+
+        // Use one attempt to avoid unnecessary retry delays.
+
+        RetryPolicy retryPolicy =
+                new RetryPolicy(
+                        1,
+                        0,
+                        1.0,
+                        0
+                );
+
+
+        Pipeline<String> pipeline =
+                new Pipeline<>("lifecycle-test", source);
+
+        pipeline.addSink(sink);
+
+
+        PipelineExecutor<String> executor =
+                new PipelineExecutor<>(
+                        pipeline,
+                        retryPolicy,
+                        deadLetterQueue
+                );
+
+
+        // The executor should terminate normally after
+        // detecting that the event cannot be resolved.
+
+        executor.start();
+
+
+        // An unresolved event must be classified
+        // as a pipeline failure.
+
+        assertThat(executor.getState())
+                .isEqualTo(PipelineState.FAILED);
+
+
+        // Verify that both destinations were attempted.
+
+        verify(sink).write("hello");
+
+        verify(deadLetterQueue).publish(any());
+
+
+        // Verify that resources were cleaned up.
+
+        verify(sink).stop();
+        verify(deadLetterQueue).stop();
+        verify(source).stop();
+    }
+
+
+
+    @SuppressWarnings("unchecked")
+    private Source<String> createLifecycleSource() {
+
+        Source<String> source = mock(Source.class);
+
+        doReturn(String.class)
+                .when(source)
+                .getOutputType();
+
+        return source;
+    }
+
+
+
+    @SuppressWarnings("unchecked")
+    private Sink<String> createLifecycleSink() {
+
+        Sink<String> sink = mock(Sink.class);
+
+        doReturn(String.class)
+                .when(sink)
+                .getInputType();
+
+        return sink;
+    }
+
+
+    private PipelineExecutor<String> createLifecycleExecutor(
+            Source<String> source,
+            Sink<String> sink
+    ) {
+
+        Pipeline<String> pipeline =
+                new Pipeline<>("lifecycle-test", source);
+
+        pipeline.addSink(sink);
+
+        return new PipelineExecutor<>(pipeline);
+    }
+
+
+    private Thread startLifecycleThread(
+            PipelineExecutor<?> executor,
+            AtomicReference<Throwable> failure
+    ) {
+
+        Thread thread = new Thread(() -> {
+
+            try {
+
+                executor.start();
+
+            } catch (Throwable throwable) {
+
+                failure.set(throwable);
+            }
+
+        }, "pipeline-lifecycle-test");
+
+        thread.setDaemon(true);
+
+        thread.start();
+
+        return thread;
+    }
+
+
+    private void awaitLifecycleState(
+            PipelineExecutor<?> executor,
+            PipelineState expectedState
+    ) throws InterruptedException {
+
+        long deadline = System.nanoTime()
+                + TimeUnit.SECONDS.toNanos(3);
+
+        while (System.nanoTime() < deadline) {
+
+            if (executor.getState() == expectedState) {
+                return;
+            }
+
+            Thread.sleep(10);
+        }
+
+        assertThat(executor.getState())
+                .as("Expected pipeline lifecycle state")
+                .isEqualTo(expectedState);
     }
 
 
